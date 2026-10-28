@@ -1,0 +1,104 @@
+/* ============================================================
+   AI 原型画布 — Dark Studio 设计系统
+   参考 Linear / Figma dark：统一深度分层、精确灰阶、
+   微妙边框、聚焦的强调色。所有表面同属一个深度体系。
+   ============================================================ */
+:root {
+  /* 深度分层（从画布外围到内容逐层抬亮） */
+  --bg-root: #08090a;        /* 最深：应用底 */
+  --bg-canvas: #101214;      /* 画布区 */
+  --bg-panel: #0d0f11;       /* 侧栏 / 顶栏 */
+  --bg-elevated: #15171b;    /* 卡片 / 输入卡 / 弹层 */
+  --bg-raised: #1b1e23;      /* 更高一层：hover 卡 / chip 底 */
+
+  /* 表面交互 */
+  --hover: rgba(255, 255, 255, 0.045);
+  --active: rgba(255, 255, 255, 0.08);
+
+  /* 线 */
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.13);
+
+  /* 文字 */
+  --ink: rgba(255, 255, 255, 0.92);
+  --ink-2: rgba(255, 255, 255, 0.6);
+  --ink-3: rgba(255, 255, 255, 0.36);
+
+  /* 强调 */
+  --accent: #ff6b47;
+  --accent-deep: #e8552f;
+  --accent-soft: rgba(255, 107, 71, 0.12);
+
+  /* 画布点缀 */
+  --canvas-dot: rgba(255, 255, 255, 0.055);
+  --canvas-glow: radial-gradient(1100px 480px at 70% -12%, rgba(255, 107, 71, 0.07), transparent 60%);
+
+  /* 阴影：深色下用「提亮 + 大投影」而非黑影 */
+  --shadow-card: 0 0 0 1px var(--line), 0 12px 32px rgba(0, 0, 0, 0.5);
+  --shadow-float: 0 0 0 1px var(--line-strong), 0 24px 64px rgba(0, 0, 0, 0.6);
+
+  --sans:
+    -apple-system, 'SF Pro Text', 'PingFang SC', 'Microsoft YaHei', 'Segoe UI',
+    sans-serif;
+  --serif: Georgia, 'Songti SC', 'Noto Serif SC', 'SimSun', serif;
+  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --radius-s: 6px;
+  --radius-m: 10px;
+  --radius-l: 14px;
+
+  /* 动效 */
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --dur-slow: 280ms;
+  --ease: cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--sans);
+  color: var(--ink);
+  background: var(--bg-root);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::selection {
+  background: rgba(255, 107, 71, 0.3);
+}

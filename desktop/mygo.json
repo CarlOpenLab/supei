@@ -1,0 +1,12 @@
+{
+  "name": "AI 原型画布",
+  "slug": "ai-design-canvas",
+  "identifier": "dev.designcanvas.app",
+  "version": "0.1.0",
+  "devUrl": "http://localhost:5188",
+  "devCommand": "node ../node_modules/vite/bin/vite.js .. --port 5188 --strictPort --mode desktop",
+  "buildCommand": "npm run build:desktop --prefix ..",
+  "frontendDist": "../dist",
+  "bindings": "../src/services/mygo-client.ts",
+  "out": "build"
+}
