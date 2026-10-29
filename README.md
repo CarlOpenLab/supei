@@ -1,5 +1,7 @@
 # AI Design Canvas
 
+English | [简体中文](README_ZH.md)
+
 Design web UIs with AI on an infinite canvas. Chat to generate HTML prototypes with live streaming preview, click any element for targeted feedback, compare variants side by side, and export a single-file interactive preview when the design settles — pulling "what should it look like" out of the AI coding loop: discuss first, implement later.
 
 The interface follows the [wonder.design](https://wonder.design) language: layered near-black surfaces, Inter / Uncut Sans / JetBrains Mono, purple accent buttons, hairline strokes, frosted-glass overlays. The AI side ships a distilled design methodology (tokens first, type scale, restrained palettes, asymmetric composition, CJK typesetting discipline, an anti-AI-template checklist) plus **9 built-in design styles** — **Auto / Editorial Magazine / Dark Tech / Swiss International / Warm & Friendly / Neo-Brutalism / Wabi-Sabi Minimal / Linear Dark SaaS / Bauhaus Composition** — hard constraints applied to both full generation and incremental iteration.
@@ -124,19 +126,3 @@ The AI-side design system and built-in styles live in `src/plugins/registry.ts` 
 - `npm run build` — type check + production build
 - `npm run preview` — preview the build
 - `npm run build:desktop` — desktop-mode build
-
----
-
-## 简体中文
-
-**AI 原型画布**：在无限画布上与 AI 一起打磨网页原型——聊天流式生成 HTML、点选元素定向反馈、多方案并排对比，定稿后一键导出单文件交互式预览页或各画板 HTML，把「设计长什么样」从 AI 编码流程里拆出来，先讨论、后实现。界面语言对齐 wonder.design，内置 9 种设计风格与一套蒸馏自专业方法论的设计规范。
-
-- **画板协作**：版本历史与三级 diff 对比、方案对齐排版、缩放/框选/吸附对齐等画布操作齐备；
-- **手动编辑**：检查器就地调整样式、双击改字、Alt 测距，保存落成新版本，AI 迭代前自动保存；
-- **桌面端**（`cd desktop && go tool mygo dev`）：接入本机 Claude Code / Codex（用你自己的订阅）、运行本地仓库 dev server 实时预览并让 Agent 直接改源码、任意网页捕获为设计稿、局域网分享（链接 + 二维码）；
-- **接入模型**：任意 OpenAI 兼容接口（智谱 GLM / DeepSeek / OpenAI 等），API Key 只存本机；首次启动为内置演示模式，无需 Key。
-
-```bash
-npm install
-npm run dev        # http://localhost:5188
-```
