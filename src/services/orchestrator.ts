@@ -1,23 +1,19 @@
 import { useCanvasStore } from '@/stores/canvas'
 import { useSettingsStore } from '@/stores/settings'
 import { useWorkspaceStore, type NewArtboardInput } from '@/stores/workspace'
-import type { Artboard, ElementContext, PlanPayload, PlanStyle } from '@/types'
-import { generatePrototype } from './generator'
+import type { Artboard, ElementContext, PlanPayload, PlanStyle, Version } from '@/types'
+import { applyEdits } from '@/utils/editable'
+import { describeChanges } from '@/utils/diff'
+import { describeElement, generatePrototype } from './generator'
+import { isAgentProvider, streamAgent } from './llm'
 import { planIteration, planPrototype } from './planner'
 import { pluginRegistry } from '@/plugins/registry'
 import type { TemplatePluginData } from '@/plugins/types'
 
 const activeControllers = new Set<AbortController>()
 
-interface FailedRequest {
-  boardId: string
-  prompt: string
-  isNew: boolean
-  elementContext: ElementContext | null
-}
-
-/** 最近一次失败请求，供「重试」使用 */
-let lastFailed: FailedRequest | null = null
+/** 最近一次失败的请求（生成原型或 Agent 改代码），供错误卡上的「重试」使用 */
+let retryAction: (() => Promise<void>) | null = null
 
 function defaultTemplate(): TemplatePluginData {
   const t = pluginRegistry.listByKind('template')[0]
@@ -32,7 +28,7 @@ const VARIANT_HINT = [
 ]
 
 export function isGenerating(): boolean {
-  return useCanvasStore().generating.length > 0
+  return useCanvasStore().busy
 }
 
 export function stopGeneration() {
@@ -40,16 +36,10 @@ export function stopGeneration() {
 }
 
 export async function retryLast() {
-  const cv = useCanvasStore()
-  if (!lastFailed || cv.generating.length > 0) return
-  const board = useWorkspaceStore().findArtboard(lastFailed.boardId)
-  if (!board) {
-    lastFailed = null
-    return
-  }
-  const { prompt, isNew, elementContext } = lastFailed
-  lastFailed = null
-  await runGeneration({ board, prompt, isNew, elementContext })
+  const action = retryAction
+  if (!action || useCanvasStore().busy) return
+  retryAction = null
+  await action()
 }
 
 function cascadePosition(): { x: number; y: number } {
@@ -64,6 +54,33 @@ function cascadePosition(): { x: number; y: number } {
   return { x: worldCx - 640 + n * 36, y: Math.max(0, worldCy - 400 + n * 36) }
 }
 
+/**
+ * @description 把画板上待保存的手动修改落成一个新版本。检查器「保存」调用；AI 迭代前也会自动调用，
+ * 因为 AI 总是基于当前版本源码修改，不先落盘的话手动修改会被 AI 结果覆盖丢失。
+ * @param boardId - 画板 id
+ * @returns 新版本；没有待保存修改时返回 null
+ */
+export async function commitManualEdits(boardId: string): Promise<Version | null> {
+  const ws = useWorkspaceStore()
+  const cv = useCanvasStore()
+  const edits = cv.edits[boardId]
+  const board = ws.findArtboard(boardId)
+  if (!board || !edits || !Object.keys(edits).length) return null
+  const current = ws.currentVersionOf(board)
+  if (!current) throw new Error('画板还没有版本，无法保存手动修改')
+  const count = Object.keys(edits).length
+  const version = await ws.addVersion(boardId, applyEdits(current.html, edits))
+  // 先落新版本再清修改：iframe 换成已含修改的新版本时不会闪回旧样式
+  cv.clearEdits(boardId)
+  await ws.addMessage({
+    artboardId: boardId,
+    role: 'assistant',
+    content: `已保存手动编辑（${count} 个元素）为 v${board.versions.length}`,
+    versionId: version.id,
+  })
+  return version
+}
+
 /** 工具栏「新建画板」：创建一块空白画板（之后可在聊天中向它生成） */
 export async function createEmptyArtboard(
   input: Partial<NewArtboardInput> = {},
@@ -75,6 +92,7 @@ export async function createEmptyArtboard(
       ? { x: input.x, y: input.y }
       : cascadePosition()
   const board = await ws.createArtboard({
+    ...input,
     title: input.title ?? `画板 ${ws.artboards.length + 1}`,
     width: input.width ?? defaultTemplate().width,
     height: input.height ?? defaultTemplate().height,
@@ -114,6 +132,7 @@ async function runGeneration(params: {
     })
   }
 
+  if (!isNew) await commitManualEdits(board.id)
   cv.startGenerating(board.id)
   const ac = new AbortController()
   activeControllers.add(ac)
@@ -158,7 +177,10 @@ async function runGeneration(params: {
     const e = err as Error
     const aborted = e.name === 'AbortError'
     if (!aborted) {
-      lastFailed = { boardId: board.id, prompt, isNew, elementContext }
+      retryAction = async () => {
+        const b = ws.findArtboard(board.id)
+        if (b) await runGeneration({ board: b, prompt, isNew, elementContext })
+      }
     }
     await ws.addMessage({
       artboardId: board.id,
@@ -183,7 +205,14 @@ export async function sendPrompt(text: string, variantCount = 1) {
   const cv = useCanvasStore()
   const st = useSettingsStore()
   const trimmed = text.trim()
-  if (!trimmed || cv.generating.length > 0) return
+  if (!trimmed || cv.busy) return
+
+  // 实时画板：对话直接交给本机 Agent 改仓库代码（网页实时画板没有源码，先捕获为设计稿）
+  const selectedBoard = ws.findArtboard(cv.selectedArtboardId)
+  if (selectedBoard?.kind === 'live') {
+    await sendLiveFeedback(selectedBoard, null, trimmed)
+    return
+  }
 
   if (variantCount <= 1) {
     let board = ws.findArtboard(cv.selectedArtboardId)
@@ -193,6 +222,7 @@ export async function sendPrompt(text: string, variantCount = 1) {
       if (complex && board) {
         const b: Artboard = board
         cv.select(b.id)
+        await commitManualEdits(b.id)
         await ws.addMessage({ artboardId: b.id, role: 'user', content: trimmed })
         cv.startGenerating(b.id)
         const ac = new AbortController()
@@ -355,7 +385,7 @@ export async function startFromPlan(params: {
   const cv = useCanvasStore()
   const ws = useWorkspaceStore()
   const board = ws.findArtboard(params.boardId)
-  if (!board || cv.generating.length > 0) return
+  if (!board || cv.busy) return
 
   const answerLines = Object.entries(params.answers ?? {})
     .map(([q, a]) => `- ${q}：${a}`)
@@ -387,7 +417,7 @@ export async function replan(boardId: string, planMessageId: string, originalPro
   const st = useSettingsStore()
   const board = ws.findArtboard(boardId)
   const msg = ws.messages.find((m) => m.id === planMessageId)
-  if (!board || !msg?.plan || cv.generating.length > 0) return
+  if (!board || !msg?.plan || cv.busy) return
 
   cv.startGenerating(board.id)
   const ac = new AbortController()
@@ -415,8 +445,257 @@ export async function sendElementFeedback(ctx: ElementContext, text: string) {
   const ws = useWorkspaceStore()
   const cv = useCanvasStore()
   const trimmed = text.trim()
-  if (!trimmed || cv.generating.length > 0) return
+  if (!trimmed || cv.busy) return
   const board = ws.findArtboard(cv.selectedArtboardId)
   if (!board || board.versions.length === 0) return
   await runGeneration({ board, prompt: trimmed, isNew: false, elementContext: ctx })
+}
+
+// —— 本机 Agent 改代码：实时画板反馈 / 设计稿写回 ——
+
+const CODE_AGENT_PROMPT = `你正在用户的前端项目仓库里工作。用户在一个可视化设计画布上查看这个项目的实时页面：dev server 已经在运行，保存文件后页面会热更新。
+要求：
+- 按用户的设计要求直接修改源码；改动尽量小，遵循项目现有的组件结构、样式方案（CSS / Tailwind / CSS-in-JS 等）和代码风格。
+- 不要启动、重启或停止 dev server，不要安装新依赖，不要提交 git。
+- 完成后用 2-4 句中文说明改了哪些文件、做了什么。`
+
+/** 进度消息里最多保留的工具调用行数 */
+const MAX_TOOL_LINES = 12
+
+/**
+ * @description 生成「去掉仓库目录前缀」的函数，工具调用里的绝对路径显示成仓库内相对路径（两种斜杠都处理）。
+ * @param repoDir - 仓库目录
+ * @returns 把文本里的仓库前缀去掉的函数
+ */
+function relativeTo(repoDir: string): (text: string) => string {
+  const dir = repoDir.replace(/[\\/]+$/, '')
+  const prefixes = [dir.replace(/\//g, '\\') + '\\', dir.replace(/\\/g, '/') + '/']
+  return (text) => prefixes.reduce((s, p) => s.split(p).join(''), text)
+}
+
+/**
+ * @description 让本机 Agent（Claude Code / Codex）在仓库里改代码，工具调用与回答实时写进一条 assistant 消息，
+ * 可被聊天面板的「停止」中止。当前模型不是本机 Agent 时给出可重试的配置提示。
+ * @param params.boardId - 消息归属的画板
+ * @param params.repoDir - 仓库目录（Agent 工作目录）
+ * @param params.userText - 显示在对话流里的用户原话
+ * @param params.prompt - 实际发给 Agent 的完整指令
+ * @param params.elementContext - 用户点选的元素（可选）
+ */
+export async function runCodeAgent(params: {
+  boardId: string
+  repoDir: string
+  userText: string
+  prompt: string
+  elementContext?: ElementContext | null
+}): Promise<void> {
+  const ws = useWorkspaceStore()
+  const cv = useCanvasStore()
+  const provider = useSettingsStore().active
+  if (cv.busy) return
+  const { boardId } = params
+  await ws.addMessage({
+    artboardId: boardId,
+    role: 'user',
+    content: params.userText,
+    elementContext: params.elementContext ?? null,
+  })
+  if (!isAgentProvider(provider)) {
+    retryAction = () => runCodeAgent(params)
+    await ws.addMessage({
+      artboardId: boardId,
+      role: 'assistant',
+      status: 'error',
+      content: '改代码需要本机 Agent：请在「设置 → 模型设置」添加 Claude Code 或 Codex，并在下方模型选择里切换过去，然后重试。',
+    })
+    return
+  }
+
+  const working = `${provider.name} 正在修改代码…`
+  const msg = await ws.addMessage({ artboardId: boardId, role: 'assistant', content: working })
+  const ac = new AbortController()
+  activeControllers.add(ac)
+  cv.agentRun = { boardId, messageId: msg.id }
+  const tools: string[] = []
+  const rel = relativeTo(params.repoDir)
+  let answer = ''
+  const render = () => {
+    const shown = tools.slice(-MAX_TOOL_LINES).map((t) => `› ${t}`)
+    if (tools.length > MAX_TOOL_LINES) shown.unshift(`… 共 ${tools.length} 步`)
+    return [shown.join('\n'), answer.trim()].filter(Boolean).join('\n\n') || working
+  }
+  // 进度写库节流：工具事件可能很密
+  let timer: number | null = null
+  const schedule = () => {
+    timer ??= window.setTimeout(() => {
+      timer = null
+      void ws.updateMessage(msg.id, { content: render() })
+    }, 300)
+  }
+
+  try {
+    for await (const delta of streamAgent({
+      kind: provider.kind,
+      model: provider.model,
+      mode: 'code',
+      cwd: params.repoDir,
+      systemPrompt: CODE_AGENT_PROMPT,
+      prompt: params.prompt,
+      signal: ac.signal,
+      onEvent: (e) => {
+        if (e.type === 'tool') {
+          tools.push(rel(e.text))
+          schedule()
+        }
+      },
+    })) {
+      answer += delta
+      schedule()
+    }
+    if (timer !== null) window.clearTimeout(timer)
+    await ws.updateMessage(msg.id, { content: render() })
+  } catch (err) {
+    if (timer !== null) window.clearTimeout(timer)
+    const e = err as Error
+    if (e.name === 'AbortError') {
+      await ws.updateMessage(msg.id, { content: `已停止。\n\n${render()}`, status: 'aborted' })
+    } else {
+      retryAction = () => runCodeAgent(params)
+      await ws.updateMessage(msg.id, { content: `改代码失败：${e.message}`, status: 'error' })
+      console.error('[code-agent]', err)
+    }
+  } finally {
+    activeControllers.delete(ac)
+    cv.agentRun = null
+  }
+}
+
+/**
+ * @description 实时画板上的反馈：点选元素（或直接在对话里描述）后交给本机 Agent 改仓库源码。
+ * 网页实时画板没有源码，提示先捕获为设计稿。
+ * @param board - 实时画板
+ * @param ctx - 点选的元素；对话直接描述时为 null
+ * @param text - 修改要求
+ */
+export async function sendLiveFeedback(board: Artboard, ctx: ElementContext | null, text: string): Promise<void> {
+  const live = board.live
+  if (!live) return
+  if (live.type !== 'repo' || !live.repoDir) {
+    const ws = useWorkspaceStore()
+    await ws.addMessage({ artboardId: board.id, role: 'user', content: text, elementContext: ctx })
+    await ws.addMessage({
+      artboardId: board.id,
+      role: 'assistant',
+      content: '这是网页实时画板，没有可修改的源码。先在画板头栏点「捕获」生成设计稿，再在设计稿上让 AI 迭代或手动编辑。',
+    })
+    return
+  }
+  const parts = [`【页面路由】${live.route}`]
+  if (ctx) parts.push('', '【用户在实时页面上选中的元素】', describeElement(ctx))
+  parts.push('', '【修改要求】', text, '', ctx ? '请在源码中找到渲染该元素的组件，按要求修改。' : '请按要求修改这个页面的源码。')
+  await runCodeAgent({ boardId: board.id, repoDir: live.repoDir, userText: text, prompt: parts.join('\n'), elementContext: ctx })
+}
+
+/**
+ * @description 从期望位置起找一块不与已有画板重叠的空位：撞上就移到那块画板下方继续找。
+ * @param x - 期望 x（保持不变）
+ * @param y - 期望 y
+ * @param w - 新画板宽
+ * @param h - 新画板高
+ * @returns 可放置的坐标
+ */
+function freeSpot(x: number, y: number, w: number, h: number): { x: number; y: number } {
+  const GAP = 48
+  const boards = useWorkspaceStore().artboards
+  let top = y
+  for (;;) {
+    const hit = boards.find(
+      (b) => x < b.x + b.width + GAP && x + w + GAP > b.x && top < b.y + b.height + GAP && top + h + GAP > b.y,
+    )
+    if (!hit) return { x, y: top }
+    top = hit.y + hit.height + GAP
+  }
+}
+
+/**
+ * @description 把实时画板的当前页面捕获为可编辑的设计稿画板（放在右侧）。快照里的资源地址指向代理源，
+ * 换回真实源（dev server / 网站），代理关掉后图片和字体仍能加载。
+ * @param board - 实时画板
+ * @param snap - bridge 序列化出的页面
+ * @param origins - 本次会话的代理源与真实源
+ * @returns 新建的设计稿画板
+ */
+export async function captureLiveBoard(
+  board: Artboard,
+  snap: { html: string; title: string },
+  origins: { proxyOrigin: string; targetOrigin: string },
+): Promise<Artboard> {
+  const ws = useWorkspaceStore()
+  const cv = useCanvasStore()
+  const live = board.live!
+  const html = snap.html.split(origins.proxyOrigin).join(origins.targetOrigin)
+  const design = await ws.createArtboard({
+    title: `${snap.title || board.title} · 设计稿`.slice(0, 40),
+    width: board.width,
+    height: board.height,
+    ...freeSpot(board.x + board.width + 80, board.y, board.width, board.height),
+    parent: board.id,
+    capture: {
+      boardId: board.id,
+      repoDir: live.type === 'repo' ? live.repoDir : undefined,
+      route: live.route,
+      url: origins.targetOrigin + live.route,
+    },
+  })
+  const version = await ws.addVersion(design.id, html)
+  await ws.addMessage({
+    artboardId: design.id,
+    role: 'assistant',
+    versionId: version.id,
+    content:
+      `已把「${live.route}」捕获为设计稿 v1：可以让 AI 迭代或用 ✎ 手动编辑` +
+      (live.type === 'repo' ? '，满意后在画板菜单选「写回代码」。' : '。'),
+  })
+  cv.select(design.id)
+  return design
+}
+
+/** 写回代码时附带的设计稿 HTML 上限（去掉内联样式后），避免提示词过长 */
+const MAX_REFERENCE_HTML = 40_000
+
+/**
+ * @description 设计稿写回代码：先保存未保存的手动修改，再把「捕获基线 v1 → 当前版本」的改动清单
+ * 连同当前设计稿结构交给本机 Agent，在仓库里实现。
+ * @param boardId - 设计稿画板（由实时仓库画板捕获而来）
+ * @returns 没有可写回的改动时抛错，调用方提示用户
+ */
+export async function writeBackToCode(boardId: string): Promise<void> {
+  const ws = useWorkspaceStore()
+  const board = ws.findArtboard(boardId)
+  const capture = board?.capture
+  if (!board || !capture?.repoDir) throw new Error('这块画板不是从代码仓库捕获的设计稿')
+  await commitManualEdits(boardId)
+  const base = board.versions[0]
+  const current = ws.currentVersionOf(board)
+  const changes = base && current && base.id !== current.id ? describeChanges(base.html, current.html) : ''
+  if (!changes) throw new Error('设计稿相对捕获时还没有改动')
+  const doc = new DOMParser().parseFromString(current!.html, 'text/html')
+  doc.querySelectorAll('style, script').forEach((el) => el.remove())
+  const reference = doc.body.outerHTML.slice(0, MAX_REFERENCE_HTML)
+  const prompt = [
+    `【页面路由】${capture.route}`,
+    '用户把这个页面捕获到设计画布上，经过 AI 迭代和手动调整，得到了新的设计稿。下面是设计稿相对捕获时的改动（选择器路径基于捕获时的 DOM）：',
+    changes,
+    '',
+    '【当前设计稿的页面结构（已去掉内联样式表，仅供理解目标效果，不要整份照搬）】',
+    reference,
+    '',
+    '请把这些设计改动实现到项目源码中，保持现有组件结构与样式方案。',
+  ].join('\n')
+  await runCodeAgent({
+    boardId,
+    repoDir: capture.repoDir,
+    userText: `把设计稿 v${board.versions.findIndex((v) => v.id === current!.id) + 1} 的改动写回代码`,
+    prompt,
+  })
 }

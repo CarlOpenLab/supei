@@ -100,10 +100,13 @@ const bubbleStyle = computed(() => {
 .comment-bubble {
   position: absolute;
   width: 300px;
-  background: var(--bg-elevated);
-  border-radius: var(--radius-l);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow-float);
+  background: rgba(22, 22, 22, 0.92);
+  backdrop-filter: blur(10px);
+  border-radius: 12px;
+  border: none;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.09),
+    0 16px 48px rgba(0, 0, 0, 0.55);
   padding: 10px;
   z-index: 30;
   display: flex;
@@ -117,12 +120,12 @@ const bubbleStyle = computed(() => {
   min-width: 0;
 }
 .target-chip code {
-  background: var(--bg-raised);
-  color: var(--ink-2);
-  border: 1px solid var(--line-strong);
+  background: rgba(176, 92, 242, 0.16);
+  color: var(--accent);
+  border: none;
   font-family: var(--mono);
   font-size: 11px;
-  padding: 2px 6px;
+  padding: 2px 7px;
   border-radius: 5px;
   white-space: nowrap;
   overflow: hidden;
@@ -142,20 +145,21 @@ const bubbleStyle = computed(() => {
   gap: 4px;
 }
 .qchip {
-  border: 1px solid var(--line-strong);
-  background: var(--bg-raised);
+  border: none;
+  box-shadow: var(--btn-quiet-shadow);
+  background: transparent;
   color: var(--ink-2);
   font-size: 11px;
-  padding: 2px 9px;
+  padding: 3px 10px;
   border-radius: 999px;
   cursor: pointer;
   transition: all 0.12s;
   font-family: var(--sans);
 }
 .qchip:hover {
-  border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px rgba(176, 92, 242, 0.35);
 }
 .bubble-actions {
   display: flex;

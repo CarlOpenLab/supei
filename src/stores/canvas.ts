@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { Viewport } from '@/types'
+import type { Artboard, ElementEdit, FrameTool, InspectMeta, Viewport } from '@/types'
 
 export const MIN_ZOOM = 0.15
 export const MAX_ZOOM = 3
@@ -9,9 +9,18 @@ export const useCanvasStore = defineStore('canvas', {
     viewport: { x: 0, y: 0, zoom: 1 } as Viewport,
     containerSize: { w: 0, h: 0 },
     selectedArtboardId: null as string | null,
-    selectMode: true,
+    /** 画板内点选工具：默认 comment（点选定向反馈），edit 为检查器手动编辑 */
+    tool: 'comment' as FrameTool,
+    /** 编辑模式下当前检查的元素（同一时刻只在一块画板上） */
+    inspect: null as { artboardId: string; meta: InspectMeta } | null,
+    /** 待保存的手动修改：画板 id → dcId → 修改；保存时批量落成新版本 */
+    edits: {} as Record<string, Record<string, ElementEdit>>,
     /** 正在生成的画板与流式 HTML（多方案并行时有多条） */
     generating: [] as Array<{ artboardId: string; html: string }>,
+    /** 本机 Agent 正在改代码（进度写在 messageId 这条消息里）；同一时刻只跑一个 */
+    agentRun: null as { boardId: string; messageId: string } | null,
+    /** 待发布到局域网的页面（整项目预览页或单块画板）；非空时打开分享弹窗 */
+    sharePayload: null as { title: string; html: string } | null,
     /** Esc 信号计数器：通知画板组件清除待发送的元素选中态 */
     escSignal: 0,
     /** 设计风格预设 id（plugins registry）；'ai' 表示由 AI 现场生成风格 */
@@ -23,7 +32,15 @@ export const useCanvasStore = defineStore('canvas', {
     deepThink: false,
     /** 拖拽对齐参考线（世界坐标）：v = 垂直线 x 值，h = 水平线 y 值 */
     guides: { v: [] as number[], h: [] as number[] },
+    /** 画板剪贴板（Ctrl+C/V）：存放画板快照，可重复粘贴 */
+    clipboard: null as Artboard | null,
   }),
+  getters: {
+    /** 有 AI 任务在跑（生成原型或 Agent 改代码）：聊天发送与规划按钮据此禁用，停止按钮据此出现 */
+    busy(state): boolean {
+      return state.generating.length > 0 || state.agentRun !== null
+    },
+  },
   actions: {
     setViewport(vp: Partial<Viewport>) {
       Object.assign(this.viewport, vp)
@@ -70,6 +87,9 @@ export const useCanvasStore = defineStore('canvas', {
         ? this.multi.filter((x) => x !== id)
         : [...this.multi, id]
     },
+    setMulti(ids: string[]) {
+      this.multi = ids
+    },
     clearMulti() {
       this.multi = []
     },
@@ -86,8 +106,49 @@ export const useCanvasStore = defineStore('canvas', {
     setProjectKey(key: string | null) {
       this.currentProjectKey = key
     },
-    setSelectMode(v: boolean) {
-      this.selectMode = v
+    /**
+     * @description 切换画板内点选工具；离开编辑模式时清掉检查选中（待保存修改保留，仍可保存或放弃）。
+     * @param t - 目标工具，null 为关闭点选
+     */
+    setTool(t: FrameTool) {
+      this.tool = t
+      if (t !== 'edit') this.inspect = null
+    },
+    /**
+     * @description 记录编辑模式下选中的元素；bridge 应用修改后的刷新上报只更新同一画板。
+     * @param artboardId - 元素所在画板
+     * @param meta - bridge 上报的元素信息
+     * @param refresh - 是否为应用修改后的刷新（选中已被清除时忽略，避免“复活”）
+     */
+    setInspect(artboardId: string, meta: InspectMeta, refresh = false) {
+      if (refresh && this.inspect?.artboardId !== artboardId) return
+      this.inspect = { artboardId, meta }
+    },
+    clearInspect() {
+      this.inspect = null
+    },
+    /**
+     * @description 合并一处待保存修改（样式按属性覆盖；空字符串表示移除该内联样式）。
+     * @param artboardId - 画板 id
+     * @param dcId - 元素稳定编号
+     * @param patch - 要合并的样式与文字
+     */
+    setEdit(artboardId: string, dcId: string, patch: { styles?: Record<string, string>; text?: string }) {
+      const board = (this.edits[artboardId] ??= {})
+      const cur = (board[dcId] ??= { styles: {} })
+      if (patch.styles) Object.assign(cur.styles, patch.styles)
+      if (patch.text !== undefined) cur.text = patch.text
+    },
+    clearEdits(artboardId: string) {
+      delete this.edits[artboardId]
+    },
+    /**
+     * @description 画板上待保存修改涉及的元素数。
+     * @param artboardId - 画板 id
+     * @returns 元素数，0 表示没有未保存修改
+     */
+    editCount(artboardId: string): number {
+      return Object.keys(this.edits[artboardId] ?? {}).length
     },
     setContainerSize(w: number, h: number) {
       this.containerSize.w = w
@@ -107,6 +168,7 @@ export const useCanvasStore = defineStore('canvas', {
     },
     fireEsc() {
       this.escSignal++
+      this.inspect = null
     },
     setDesignStyle(id: string) {
       this.designStyleId = id

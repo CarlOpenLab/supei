@@ -5,13 +5,19 @@ import { Input, InputNumber, Modal, Select, message } from 'antdv-next'
 import { useCanvasStore } from '@/stores/canvas'
 import { useSettingsStore } from '@/stores/settings'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useLiveStore } from '@/stores/live'
 import { createEmptyArtboard } from '@/services/orchestrator'
+import { desktopAvailable, requireDesktopBridge } from '@/services/desktop'
+import type { RepoInfo } from '@/services/mygo-client'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
 import InfiniteCanvas from '@/components/canvas/InfiniteCanvas.vue'
+import InspectorPanel from '@/components/canvas/InspectorPanel.vue'
 import SettingsModal from '@/components/settings/SettingsModal.vue'
+import ShareModal from '@/components/share/ShareModal.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { pluginRegistry } from '@/plugins/registry'
 import type { TemplatePluginData } from '@/plugins/types'
+import { buildProjectViewerHtml, downloadViewer } from '@/utils/exportProject'
 
 const route = useRoute()
 const router = useRouter()
@@ -44,6 +50,111 @@ const customH = ref(768)
 const providerLabel = computed(() =>
   settings.isDemo ? '演示模式' : settings.active.name || '未命名服务商',
 )
+
+// —— 实时画板：打开本地仓库 / 捕获网页（仅桌面端）——
+const liveStore = useLiveStore()
+const LIVE_SIZES = SIZE_PRESETS.filter((o) => o.value !== 'custom')
+const liveSize = ref('1280x800')
+const repoInfo = ref<RepoInfo | null>(null)
+const repoScript = ref('')
+const webOpen = ref(false)
+const webUrl = ref('')
+
+/**
+ * @description 把尺寸预设值（如 "1280x800"）拆成宽高。
+ * @param value - 预设值
+ * @returns 画板宽高
+ */
+function sizeOf(value: string): { width: number; height: number } {
+  const [width, height] = value.split('x').map(Number)
+  return { width, height }
+}
+
+/**
+ * @description 选择本地前端项目目录，读出 scripts 后弹出确认（默认选 dev / start）。
+ */
+async function openRepo() {
+  try {
+    const bridge = await requireDesktopBridge('打开代码仓库')
+    const info = await bridge.DevServer.pickRepo()
+    if (!info.dir) return
+    if (!info.scripts.length) {
+      message.warning('这个项目的 package.json 里没有可运行的 scripts')
+      return
+    }
+    repoScript.value = ['dev', 'start', 'serve', 'preview'].find((s) => info.scripts.includes(s)) ?? info.scripts[0]
+    repoInfo.value = info
+  } catch (err) {
+    message.error((err as Error).message)
+  }
+}
+
+/** 确认打开仓库：建实时画板并启动 dev server */
+async function createRepoBoard() {
+  const info = repoInfo.value
+  if (!info) return
+  repoInfo.value = null
+  const board = await createEmptyArtboard({
+    title: info.name,
+    ...sizeOf(liveSize.value),
+    kind: 'live',
+    live: {
+      type: 'repo',
+      repoDir: info.dir,
+      script: repoScript.value,
+      packageManager: info.packageManager,
+      url: '',
+      route: '/',
+    },
+  })
+  liveStore.start(board.id)
+}
+
+/** 捕获网页：建网页实时画板（经本机代理加载），用户调整好页面状态后再「捕获」 */
+async function createWebBoard() {
+  const raw = webUrl.value.trim()
+  let url: URL
+  try {
+    url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`)
+  } catch {
+    message.warning('请输入有效的网址')
+    return
+  }
+  webOpen.value = false
+  webUrl.value = ''
+  const board = await createEmptyArtboard({
+    title: url.hostname,
+    ...sizeOf(liveSize.value),
+    kind: 'live',
+    live: { type: 'web', url: url.href, route: url.pathname + url.search + url.hash },
+  })
+  liveStore.start(board.id)
+}
+
+/** 收集可导出/分享的画板（有版本的）；一块都没有时提示并返回 null */
+function collectExportable(verb: string) {
+  const boards = ws.artboards.filter((b) => b.versions.length > 0)
+  if (!boards.length) message.warning(`还没有可${verb}的画板，先在左侧聊天里生成一个原型吧`)
+  return boards.length ? boards : null
+}
+
+/** 整项目导出：全部画板最新版 → 单文件交互式预览页 */
+function exportProjectViewer() {
+  const boards = collectExportable('导出')
+  if (!boards) return
+  const html = buildProjectViewerHtml(ws.currentProject?.name || '未命名项目', boards)
+  const safe = (ws.currentProject?.name || 'project').replace(/[\\/:*?"<>|]/g, '_')
+  downloadViewer(`${safe}-preview.html`, html)
+  message.success(`已导出 ${boards.length} 块画板的交互式预览页`)
+}
+
+/** 局域网分享整项目（桌面端）：与「导出预览」同一份交互式预览页，发布到本机服务 */
+function shareProject() {
+  const boards = collectExportable('分享')
+  if (!boards) return
+  const name = ws.currentProject?.name || '未命名项目'
+  canvas.sharePayload = { title: name, html: buildProjectViewerHtml(name, boards) }
+}
 
 function onGlobalKeydown(e: KeyboardEvent) {
   if (e.key === '?') {
@@ -126,6 +237,20 @@ async function createBoard() {
       </span>
       <span class="flex1" />
       <span class="provider-chip" :class="{ demo: settings.isDemo }">{{ providerLabel }}</span>
+      <button class="bar-btn" title="全部画板导出为单文件交互式预览页" @click="exportProjectViewer">
+        <AppIcon name="share" :size="13" /> 导出预览
+      </button>
+      <button v-if="desktopAvailable" class="bar-btn" title="发布到局域网：同网络的同事扫码即看" @click="shareProject">
+        <AppIcon name="link" :size="13" /> 分享
+      </button>
+      <template v-if="desktopAvailable">
+        <button class="bar-btn" title="打开本地前端项目：画布上实时预览，点选元素让本机 Agent 改代码" @click="openRepo">
+          <AppIcon name="code" :size="13" /> 代码仓库
+        </button>
+        <button class="bar-btn" title="把任意网页放到画布上，捕获为可编辑的设计稿" @click="webOpen = true">
+          <AppIcon name="globe" :size="13" /> 捕获网页
+        </button>
+      </template>
       <button class="bar-btn" @click="newBoardOpen = true">
         <AppIcon name="plus" :size="13" /> 新建画板
       </button>
@@ -137,21 +262,33 @@ async function createBoard() {
       </button>
     </header>
 
-    <Modal v-model:open="helpOpen" title="快捷键与操作" width="460px" :footer="null">
+    <Modal v-model:open="helpOpen" title="快捷键与操作" width="500px" :footer="null">
       <div class="help-list">
         <div class="help-group">画布</div>
-        <div class="help-row"><span>缩放 100% / 适配全部</span><span class="keys">0 / 1</span></div>
-        <div class="help-row"><span>缩放</span><span class="keys">Ctrl/⌘ + 滚轮</span></div>
-        <div class="help-row"><span>平移</span><span class="keys">拖拽空白区</span></div>
-        <div class="help-row"><span>移动画板</span><span class="keys">拖拽画板头栏</span></div>
+        <div class="help-row"><span>重置缩放 / 适配全部</span><span class="keys">0 / 1</span></div>
+        <div class="help-row"><span>缩放（阻尼平滑）</span><span class="keys">Ctrl/⌘ + 滚轮</span></div>
+        <div class="help-row"><span>平移</span><span class="keys">Space + 拖拽 / 中键拖拽</span></div>
+        <div class="help-row"><span>框选多选（Shift = 并集）</span><span class="keys">空白区左键拖拽</span></div>
         <div class="help-group">画板</div>
-        <div class="help-row"><span>复制画板</span><span class="keys">Ctrl/⌘ + D</span></div>
-        <div class="help-row"><span>删除画板</span><span class="keys">Del</span></div>
+        <div class="help-row"><span>移动画板（吸附对齐）</span><span class="keys">拖拽画板头栏</span></div>
+        <div class="help-row"><span>微移 1px / 10px</span><span class="keys">方向键 / Shift + 方向键</span></div>
+        <div class="help-row"><span>全选</span><span class="keys">Ctrl/⌘ + A</span></div>
+        <div class="help-row"><span>复制 / 粘贴（含版本）</span><span class="keys">Ctrl/⌘ + C / V</span></div>
+        <div class="help-row"><span>创建副本</span><span class="keys">Ctrl/⌘ + D</span></div>
+        <div class="help-row"><span>删除选中（含多选批量）</span><span class="keys">Del</span></div>
         <div class="help-row"><span>重命名画板</span><span class="keys">双击标题</span></div>
+        <div class="help-row"><span>画板菜单</span><span class="keys">右键画板 / ⋮</span></div>
+        <div class="help-row"><span>版本历史时间线</span><span class="keys">点击版本号</span></div>
+        <div class="help-row"><span>加入多选</span><span class="keys">Shift + 点击头栏</span></div>
         <div class="help-group">AI</div>
         <div class="help-row"><span>发送 / 停止生成</span><span class="keys">Enter / 停止按钮</span></div>
         <div class="help-row"><span>定向反馈</span><span class="keys">⌖ 点选元素</span></div>
-        <div class="help-row"><span>取消选中</span><span class="keys">Esc</span></div>
+        <div class="help-group">手动编辑</div>
+        <div class="help-row"><span>检查器调整样式</span><span class="keys">✎ 编辑工具 + 点选元素</span></div>
+        <div class="help-row"><span>就地改字（Enter 完成 / Esc 撤销）</span><span class="keys">双击文字</span></div>
+        <div class="help-row"><span>测量与其它元素的间距</span><span class="keys">选中后按住 Alt 悬停</span></div>
+        <div class="help-row"><span>保存为新版本（AI 迭代前自动保存）</span><span class="keys">画板头栏「保存」</span></div>
+        <div class="help-row"><span>取消 / 退出对比 / 清除选择</span><span class="keys">Esc</span></div>
         <p class="help-note">提示：画板获得焦点时（点过画板内部），快捷键由 webview 内部转发，行为一致。</p>
       </div>
     </Modal>
@@ -170,10 +307,41 @@ async function createBoard() {
       <ChatPanel />
       <div class="canvas-col">
         <InfiniteCanvas />
+        <InspectorPanel />
       </div>
     </div>
 
     <SettingsModal v-model:open="settingsOpen" />
+    <ShareModal />
+
+    <Modal :open="!!repoInfo" title="打开代码仓库" ok-text="启动预览" @ok="createRepoBoard" @cancel="repoInfo = null">
+      <div v-if="repoInfo" class="board-form">
+        <p class="hint mono">{{ repoInfo.dir }}</p>
+        <label>
+          <span>启动脚本（{{ repoInfo.packageManager }} run …）</span>
+          <Select v-model:value="repoScript" :options="repoInfo.scripts.map((s) => ({ label: s, value: s }))" />
+        </label>
+        <label>
+          <span>画板尺寸</span>
+          <Select v-model:value="liveSize" :options="LIVE_SIZES" />
+        </label>
+        <p class="hint">在画布上运行 dev server 并实时预览：点选页面元素或直接在对话里描述，本机 Agent 会直接改代码；也可以「捕获」成设计稿再迭代。</p>
+      </div>
+    </Modal>
+
+    <Modal v-model:open="webOpen" title="捕获网页" ok-text="打开" @ok="createWebBoard">
+      <div class="board-form">
+        <label>
+          <span>网址</span>
+          <Input v-model:value="webUrl" placeholder="https://example.com" @keydown.enter="createWebBoard" />
+        </label>
+        <label>
+          <span>画板尺寸</span>
+          <Select v-model:value="liveSize" :options="LIVE_SIZES" />
+        </label>
+        <p class="hint">网页经本机代理加载到画布上。关掉弹窗、滚到想要的状态后，点画板头栏的「捕获」得到可编辑的设计稿。</p>
+      </div>
+    </Modal>
 
     <Modal v-model:open="newBoardOpen" title="新建画板" @ok="createBoard">
       <div class="board-form">
@@ -236,7 +404,7 @@ async function createBoard() {
   background: var(--active);
 }
 .proj-name {
-  font-family: var(--serif);
+  font-family: var(--display);
   font-size: 15px;
   font-weight: 600;
   color: var(--ink);
@@ -268,31 +436,33 @@ async function createBoard() {
   letter-spacing: 0.06em;
   padding: 3px 10px;
   border-radius: 999px;
-  border: 1px solid var(--line-strong);
+  border: none;
+  box-shadow: var(--btn-quiet-shadow);
   color: var(--ink-2);
 }
 .provider-chip.demo {
   color: var(--accent);
-  border-color: rgba(255, 107, 71, 0.5);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px rgba(176, 92, 242, 0.4);
 }
 .bar-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid var(--line);
-  background: transparent;
+  border: none;
+  background: var(--btn-quiet-bg);
+  box-shadow: var(--btn-quiet-shadow);
   color: var(--ink);
   font-size: 13px;
   padding: 6px 14px;
-  border-radius: var(--radius-s);
+  border-radius: var(--radius-m);
   cursor: pointer;
   font-family: var(--sans);
-  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 .bar-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: var(--accent-soft);
+  background: var(--bg-raised);
+  color: var(--ink);
 }
 .bar-btn.icon-only {
   padding: 6px 9px;
@@ -305,8 +475,8 @@ async function createBoard() {
   align-items: center;
   gap: 10px;
   padding: 9px 16px;
-  background: linear-gradient(90deg, rgba(255, 107, 71, 0.14), rgba(255, 107, 71, 0.05));
-  border-bottom: 1px solid rgba(255, 107, 71, 0.3);
+  background: linear-gradient(90deg, rgba(176, 92, 242, 0.14), rgba(176, 92, 242, 0.05));
+  border-bottom: 1px solid rgba(176, 92, 242, 0.3);
   font-size: 12.5px;
   color: var(--ink-2);
 }
@@ -331,18 +501,19 @@ async function createBoard() {
 }
 .banner-btn {
   flex: none;
-  border: 1px solid var(--accent);
-  background: var(--accent);
+  border: none;
+  background: var(--btn-primary-bg);
+  box-shadow: var(--btn-primary-shadow);
   color: #fff;
   font-size: 12px;
-  padding: 4px 14px;
-  border-radius: var(--radius-s);
+  padding: 5px 14px;
+  border-radius: var(--radius-m);
   cursor: pointer;
   font-family: var(--sans);
-  transition: background var(--dur-fast) var(--ease);
+  transition: filter var(--dur-fast) var(--ease);
 }
 .banner-btn:hover {
-  background: var(--accent-deep);
+  filter: brightness(1.1);
 }
 .banner-close {
   flex: none;
@@ -425,5 +596,9 @@ async function createBoard() {
   font-size: 12px;
   color: var(--ink-3);
   margin: 0;
+}
+.hint.mono {
+  font-family: var(--mono);
+  word-break: break-all;
 }
 </style>

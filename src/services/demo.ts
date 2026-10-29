@@ -1,3 +1,4 @@
+import { sleepUnthrottled } from '@/utils/tickWorker'
 /**
  * 内置演示模式：不调用网络，用一段预设的高质量 HTML 模拟「流式生成」，
  * 用于无 API Key 时体验完整流程，也用于端到端自测。
@@ -103,7 +104,7 @@ export async function* streamDemo(seed: number, signal?: AbortSignal): AsyncGene
   for (let i = 0; i < html.length; i += chunkSize) {
     if (signal?.aborted) throw new DOMException('aborted', 'AbortError')
     yield html.slice(i, i + chunkSize)
-    await new Promise((r) => setTimeout(r, 40))
+    await sleepUnthrottled(40)
   }
 }
 
@@ -138,6 +139,6 @@ export async function* streamDemoDiff(
   for (let i = 0; i < text.length; i += chunkSize) {
     if (signal?.aborted) throw new DOMException('aborted', 'AbortError')
     yield text.slice(i, i + chunkSize)
-    await new Promise((r) => setTimeout(r, 45))
+    await sleepUnthrottled(45)
   }
 }

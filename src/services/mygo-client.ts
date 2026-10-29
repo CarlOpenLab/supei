@@ -4,10 +4,61 @@ import { call, type Channel } from "mygo-runtime";
 
 // ---- Types ----
 
+/**
+ * AgentEvent is one streamed agent event: "text" is answer output, "tool" a
+ * tool call summary, "log" a non-fatal notice.
+ */
+export interface AgentEvent {
+  type: string;
+  text: string;
+}
+
+/** AgentInfo describes one locally installed coding-agent CLI. */
+export interface AgentInfo {
+  kind: string;
+  path: string;
+  version: string;
+}
+
+/** AgentRunOptions configures one non-interactive agent run. */
+export interface AgentRunOptions {
+  /** Kind is "claude-code" or "codex". */
+  kind: string;
+  model?: string;
+  /**
+   * Mode "design": no tools, empty temp cwd — the agent acts as a plain LLM.
+   * Mode "code": runs inside Cwd and may edit files.
+   */
+  mode: string;
+  cwd?: string;
+  systemPrompt?: string;
+  prompt: string;
+}
+
 /** ChatMessage is one entry of the messages array. */
 export interface ChatMessage {
   role: string;
   content: string;
+}
+
+/**
+ * DevEvent is one streamed dev-server event: "log" is an output line,
+ * "ready" carries the proxied page URL once the server is reachable.
+ */
+export interface DevEvent {
+  type: string;
+  text?: string;
+  url?: string;
+  target?: string;
+}
+
+/** DevStartOptions configures one dev-server session. */
+export interface DevStartOptions {
+  dir: string;
+  script: string;
+  packageManager: string;
+  /** BridgeScript is injected into every HTML page served through the proxy. */
+  bridgeScript: string;
 }
 
 /** LLMOptions carries everything needed for one /chat/completions call. */
@@ -19,6 +70,22 @@ export interface LLMOptions {
   temperature: number;
   /** ReasoningEffort 为空时不传；部分服务商支持 high/medium/low 思考档位。 */
   reasoningEffort?: string;
+}
+
+/** RepoInfo describes a frontend repository chosen by the user. */
+export interface RepoInfo {
+  dir: string;
+  name: string;
+  scripts: string[];
+  packageManager: string;
+}
+
+/** ShareInfo describes one published preview. */
+export interface ShareInfo {
+  id: string;
+  title: string;
+  createdAt: number;
+  urls: string[];
 }
 
 /** StreamDelta is one streamed piece: a token, or a terminal error. */
@@ -84,5 +151,70 @@ export const StorageService = {
    */
   saveHTML(title: string, html: string): Promise<string> {
     return call("StorageService.SaveHTML", title, html);
+  },
+  /**
+   * WatchPluginDir watches the user plugin directory and streams a signal to
+   * the page whenever a .md/.json plugin pack changes, so the frontend can
+   * hot-reload plugins without restarting.
+   */
+  watchPluginDir(out: Channel<string>): Promise<void> {
+    return call("StorageService.WatchPluginDir", out);
+  },
+} as const;
+
+/** AgentService runs local coding-agent CLIs and streams their output. */
+export const AgentService = {
+  /** Detect reports which supported agent CLIs are installed on PATH. */
+  detect(): Promise<AgentInfo[]> {
+    return call("AgentService.Detect");
+  },
+  /**
+   * Run executes the agent once and streams its events to the page. Closing
+   * the channel on the frontend cancels ctx, which kills the process tree.
+   */
+  run(opts: AgentRunOptions, out: Channel<AgentEvent>): Promise<void> {
+    return call("AgentService.Run", opts, out);
+  },
+} as const;
+
+/** DevServerService runs repository dev servers and injecting proxies. */
+export const DevServerService = {
+  /**
+   * PickRepo opens a native folder picker and inspects the chosen repository.
+   * Returns an empty Dir when the user canceled.
+   */
+  pickRepo(): Promise<RepoInfo> {
+    return call("DevServerService.PickRepo");
+  },
+  /**
+   * Proxy serves an arbitrary website through the injecting proxy (used for
+   * web capture). It blocks until the frontend closes the channel.
+   */
+  proxy(target: string, bridgeScript: string, out: Channel<DevEvent>): Promise<void> {
+    return call("DevServerService.Proxy", target, bridgeScript, out);
+  },
+  /**
+   * Start runs `<pm> run <script>` in the repository, streams its output and,
+   * once a local URL appears, serves it through an injecting proxy. Closing the
+   * channel on the frontend stops both the proxy and the dev server.
+   */
+  start(opts: DevStartOptions, out: Channel<DevEvent>): Promise<void> {
+    return call("DevServerService.Start", opts, out);
+  },
+} as const;
+
+/** ShareService publishes prototype previews on the local network. */
+export const ShareService = {
+  /** List returns all published previews, newest first. */
+  list(): Promise<ShareInfo[]> {
+    return call("ShareService.List");
+  },
+  /** Publish stores the page and returns its LAN URLs. */
+  publish(title: string, html: string): Promise<ShareInfo> {
+    return call("ShareService.Publish", title, html);
+  },
+  /** Unpublish deletes a published preview; its links return 404 afterwards. */
+  unpublish(id: string): Promise<void> {
+    return call("ShareService.Unpublish", id);
   },
 } as const;

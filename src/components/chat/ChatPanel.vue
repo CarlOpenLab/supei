@@ -24,6 +24,11 @@ const targetBoard = computed(() => ws.findArtboard(canvas.selectedArtboardId))
 const placeholder = computed(() => {
   const b = targetBoard.value
   if (!b) return '描述你想要的页面，AI 将创建画板并生成原型'
+  if (b.kind === 'live') {
+    return b.live?.type === 'repo'
+      ? `描述要改的地方，本机 Agent 会直接修改「${b.title}」的代码`
+      : '网页实时画板没有源码：先在头栏「捕获」为设计稿再迭代'
+  }
   return b.versions.length
     ? `向「${b.title}」描述改动，Enter 发送`
     : `将在「${b.title}」上生成原型，描述你想要的页面`
@@ -50,7 +55,8 @@ watch(
   () =>
     ws.messages.length +
     canvas.generating.length +
-    (canvas.generating.reduce((n, g) => n + g.html.length, 0) > 0 ? 1 : 0),
+    (canvas.generating.reduce((n, g) => n + g.html.length, 0) > 0 ? 1 : 0) +
+    (canvas.agentRun ? (ws.messages.find((m) => m.id === canvas.agentRun!.messageId)?.content.length ?? 0) : 0),
   () => {
     nextTick(() => {
       const el = scrollRef.value
@@ -71,7 +77,9 @@ const generatingText = computed(() => {
 })
 
 // 是否处于「新建」场景：可选拆分多方案
-const isNewScene = computed(() => !targetBoard.value || targetBoard.value.versions.length === 0)
+const isNewScene = computed(
+  () => !targetBoard.value || (targetBoard.value.kind !== 'live' && targetBoard.value.versions.length === 0),
+)
 
 // 风格下拉：内置 + 自定义分组
 
@@ -134,12 +142,15 @@ function startPlan(msg: ChatMessage) {
   })
 }
 
-// 深色侧栏下的 AI 气泡内容样式
+// AI 消息不做「泡泡」：透明内容 + 纯文本排版（v0 / wonder 式阅读体验）
 const bubbleStyles = {
   content: {
-    background: 'var(--bg-raised)',
+    background: 'transparent',
     color: 'var(--ink)',
-    border: '1px solid var(--line)',
+    border: 'none',
+    padding: '2px 0',
+    fontSize: '13.5px',
+    lineHeight: '1.7',
   },
 }
 </script>
@@ -223,7 +234,7 @@ const bubbleStyles = {
             <div class="plan-tray-footer">
               <button
                 class="tray-btn"
-                :disabled="replanning.has(msg.id) || canvas.generating.length > 0"
+                :disabled="replanning.has(msg.id) || canvas.busy"
                 @click="onReplan(msg)"
               >
                 <AppIcon name="refresh" :size="11" />
@@ -235,7 +246,7 @@ const bubbleStyles = {
               </span>
               <button
                 class="tray-btn solid"
-                :disabled="canvas.generating.length > 0 || replanning.has(msg.id)"
+                :disabled="canvas.busy || replanning.has(msg.id)"
                 @click="startPlan(msg)"
               >
                 <AppIcon name="sparkle" :size="12" />
@@ -258,7 +269,7 @@ const bubbleStyles = {
               <button
                 v-if="msg.status === 'error'"
                 class="retry-btn"
-                :disabled="canvas.generating.length > 0"
+                :disabled="canvas.busy"
                 @click="retryLast()"
               >
                 <AppIcon name="refresh" :size="11" /> 重试
@@ -269,7 +280,7 @@ const bubbleStyles = {
         </div>
       </template>
 
-      <div v-if="canvas.generating" class="chat-item assistant">
+      <div v-if="canvas.generating.length > 0" class="chat-item assistant">
         <Bubble :content="generatingText" loading placement="start" variant="filled" :styles="bubbleStyles" class="bubble" />
       </div>
     </div>
@@ -278,10 +289,11 @@ const bubbleStyles = {
       <!-- v0 式 composer：控件全部收进输入框卡片 -->
       <Sender
         v-model:value="input"
-        :loading="canvas.generating.length > 0"
+        :loading="canvas.busy"
         :placeholder="placeholder"
         :auto-size="{ minRows: 1, maxRows: 6 }"
         class="composer"
+        :class="canvas.busy ? 'is-loading' : ''"
         @submit="onSubmit"
         @cancel="stopGeneration"
       >
@@ -346,7 +358,7 @@ const bubbleStyles = {
   border-bottom: 1px solid var(--line);
 }
 .chat-title {
-  font-family: var(--serif);
+  font-family: var(--display);
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -365,7 +377,7 @@ const bubbleStyles = {
 }
 .target-chip.active {
   color: var(--accent);
-  border-color: rgba(255, 107, 71, 0.5);
+  border-color: rgba(176, 92, 242, 0.5);
 }
 .chat-scroll {
   flex: 1;
@@ -377,10 +389,6 @@ const bubbleStyles = {
 }
 .chat-item {
   animation: enter var(--dur) var(--ease);
-}
-/* Bubble 组件自带的打字起始装饰点：内容完整渲染时是冗余噪音 */
-.chat-item :deep(.antd-bubble-start) {
-  display: none;
 }
 .chat-item.user {
   display: flex;
@@ -395,10 +403,10 @@ const bubbleStyles = {
 }
 .user-bubble {
   max-width: 88%;
-  background: var(--bg-raised);
-  border: 1px solid var(--line);
+  background: var(--bg-elevated);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
   color: var(--ink);
-  border-radius: 12px 4px 12px 12px;
+  border-radius: 14px 4px 14px 14px;
   padding: 9px 13px;
 }
 .user-bubble p {
@@ -415,10 +423,11 @@ const bubbleStyles = {
   margin-bottom: 6px;
 }
 .ctx-chip code {
-  background: var(--accent-deep);
-  color: #fff;
+  background: rgba(176, 92, 242, 0.16);
+  color: var(--accent);
+  font-family: var(--mono);
   font-size: 11px;
-  padding: 1px 6px;
+  padding: 1px 7px;
   border-radius: 4px;
   max-width: 170px;
   overflow: hidden;
@@ -438,10 +447,22 @@ const bubbleStyles = {
 }
 .bubble {
   max-width: 100%;
-  font-size: 13px;
+  font-size: 13.5px;
 }
+/* Agent 改代码的进度是逐行的工具调用，保留换行 */
+.bubble :deep([class*='bubble-content']) {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 错误态：透明泡泡下的红色静默卡 */
 .bubble.error {
-  border-left: 3px solid var(--accent) !important;
+  background: rgba(255, 84, 89, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(255, 84, 89, 0.28);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+.bubble.error :deep([class*='bubble-content']) {
+  background: transparent !important;
 }
 .retry-btn {
   display: inline-flex;
@@ -473,9 +494,10 @@ const bubbleStyles = {
   gap: 6px;
 }
 .chat-empty .lead {
-  font-family: var(--serif);
-  font-size: 17px;
+  font-family: var(--display);
+  font-size: 19px;
   font-weight: 600;
+  letter-spacing: -0.02em;
   color: var(--ink);
   margin: 0 0 4px;
   text-align: center;
@@ -528,30 +550,73 @@ const bubbleStyles = {
   opacity: 1;
 }
 .chat-footer {
-  padding: 10px 12px 12px;
+  padding: 12px 14px 14px;
 }
-/* —— v0 式 composer：控件收进输入框卡片 —— */
+/* —— wonder 式 composer：一块浮起的输入卡片，控件皆为静默 pill —— */
 .composer {
-  border-radius: var(--radius-l);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  background: var(--bg-elevated) !important;
+  border: none !important;
+  border-radius: 14px !important;
+  padding: 4px !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+    0 10px 32px rgba(0, 0, 0, 0.45);
+  transition: box-shadow var(--dur) var(--ease);
 }
-.composer :deep(.antd-sender-header) {
-  padding: 9px 12px 0 !important;
-  border-bottom: none !important;
+.composer:focus-within {
+  box-shadow:
+    inset 0 0 0 1px rgba(176, 92, 242, 0.45),
+    0 0 0 4px rgba(176, 92, 242, 0.1),
+    0 10px 32px rgba(0, 0, 0, 0.45);
+}
+.composer :deep(.antd-sender-content) {
+  gap: 4px;
+}
+.composer :deep(.ant-input) {
+  padding: 8px 10px !important;
+  font-size: 13.5px;
+  color: var(--ink);
+  background: transparent !important;
+}
+.composer :deep(.ant-input::placeholder) {
+  color: var(--ink-3);
+}
+/* 发送 / 停止按钮：紫色高光圆钮 */
+.composer :deep(.antd-sender-actions-list .ant-btn) {
+  width: 30px;
+  height: 30px;
+  border: none !important;
+  color: var(--ink-3) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transition: filter var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.composer :deep(.antd-sender-actions-list .ant-btn:not(:disabled)) {
+  background: var(--btn-primary-bg) !important;
+  box-shadow: var(--btn-primary-shadow) !important;
+  color: #fff !important;
+}
+.composer :deep(.antd-sender-actions-list .ant-btn:not(:disabled):hover) {
+  filter: brightness(1.1);
+}
+.composer.is-loading :deep(.antd-sender-actions-list .ant-btn:not(:disabled)) {
+  background: var(--bg-raised) !important;
+  box-shadow: var(--btn-quiet-shadow) !important;
+  color: var(--ink-2) !important;
 }
 .composer-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--line);
+  padding: 8px 10px 2px;
 }
 .count-chip {
-  border: 1px solid var(--line-strong);
+  border: none;
   background: transparent;
+  box-shadow: var(--btn-quiet-shadow);
   color: var(--ink-2);
   font-size: 11.5px;
-  padding: 2px 9px;
+  padding: 3px 10px;
   border-radius: 999px;
   cursor: pointer;
   font-family: var(--sans);
@@ -559,11 +624,11 @@ const bubbleStyles = {
 }
 .count-chip:hover {
   color: var(--ink);
-  border-color: var(--ink-3);
+  background: var(--bg-raised);
 }
 .count-chip.picked {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--btn-primary-bg);
+  box-shadow: var(--btn-primary-shadow);
   color: #fff;
 }
 .header-note {
@@ -574,28 +639,38 @@ const bubbleStyles = {
   text-overflow: ellipsis;
 }
 .composer :deep(.antd-sender-footer) {
-  padding: 0 8px 6px !important;
+  padding: 0 !important;
   border-top: none !important;
 }
 .composer-footer {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  padding: 4px 6px 6px 8px;
 }
 .model-select {
   min-width: 0;
   flex: 0 1 auto;
-  max-width: 170px;
+  max-width: 176px;
 }
 .model-select :deep(.ant-select-selector) {
   border: none !important;
   background: transparent !important;
-  padding-left: 6px !important;
+  box-shadow: var(--btn-quiet-shadow);
+  border-radius: 999px !important;
+  padding: 2px 9px !important;
   font-size: 12px;
-  color: var(--ink-2);
+  color: var(--ink-2) !important;
+  transition: background var(--dur-fast) var(--ease);
+}
+.model-select :deep(.ant-select-selector:hover) {
+  background: var(--bg-raised) !important;
+  color: var(--ink);
 }
 .model-select :deep(.ant-select-arrow) {
   color: var(--ink-3);
+  font-size: 10px;
+  inset-inline-end: 9px;
 }
 .variant-label {
   font-family: var(--mono);
@@ -607,18 +682,16 @@ const bubbleStyles = {
 .flex1 {
   flex: 1;
 }
-.model-select {
-  min-width: 128px;
-}
 .think-chip {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  border: 1px solid var(--line);
+  border: none;
+  box-shadow: var(--btn-quiet-shadow);
   background: transparent;
-  color: var(--ink-3);
+  color: var(--ink-2);
   font-size: 12px;
-  padding: 4px 10px;
+  padding: 3.5px 11px;
   border-radius: 999px;
   cursor: pointer;
   white-space: nowrap;
@@ -627,12 +700,12 @@ const bubbleStyles = {
 }
 .think-chip:hover {
   color: var(--ink);
-  border-color: var(--ink-3);
+  background: var(--bg-raised);
 }
 .think-chip.on {
-  border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px rgba(176, 92, 242, 0.35);
 }
 .style-select {
   display: none;
@@ -698,8 +771,9 @@ const bubbleStyles = {
   border-color: var(--ink-3);
 }
 .plan-opt.picked {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--btn-primary-bg);
+  box-shadow: var(--btn-primary-shadow);
+  border-color: transparent;
   color: #fff;
 }
 .plan-style-body {
@@ -739,13 +813,14 @@ const bubbleStyles = {
   border-color: var(--ink-3);
 }
 .tray-btn.solid {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--btn-primary-bg);
+  box-shadow: var(--btn-primary-shadow);
+  border-color: transparent;
   color: #fff;
 }
 .tray-btn.solid:hover:not(:disabled) {
-  background: var(--accent-deep);
-  border-color: var(--accent-deep);
+  filter: brightness(1.1);
+  border-color: transparent;
   color: #fff;
 }
 .tray-btn.solid.done {

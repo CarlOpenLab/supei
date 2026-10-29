@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { Artboard, ChatMessage, ChatRole, ElementContext, PlanPayload, Project, Version } from '@/types'
+import type { Artboard, CaptureSource, ChatMessage, ChatRole, ElementContext, LiveSource, PlanPayload, Project, Version } from '@/types'
 import * as db from '@/services/db'
 import { uid } from '@/utils/id'
 
@@ -10,6 +10,23 @@ export interface NewArtboardInput {
   x: number
   y: number
   parent?: string
+  kind?: Artboard['kind']
+  live?: LiveSource
+  capture?: CaptureSource
+}
+
+/** 深拷贝画板快照为新画板：新 id、级联偏移（+48）、刷新时间戳；title/parent 等由调用方覆盖。 */
+function cloneArtboard(snap: Artboard, projectId: string, overrides: Partial<Artboard>): Artboard {
+  return {
+    ...JSON.parse(JSON.stringify(snap)),
+    id: uid('board'),
+    projectId,
+    x: snap.x + 48,
+    y: snap.y + 48,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    ...overrides,
+  }
 }
 
 export const useWorkspaceStore = defineStore('workspace', {
@@ -78,6 +95,9 @@ export const useWorkspaceStore = defineStore('workspace', {
         id: uid('board'),
         projectId: this.currentProjectId!,
         title: input.title || '未命名画板',
+        kind: input.kind,
+        live: input.live,
+        capture: input.capture,
         parent: input.parent,
         x: input.x,
         y: input.y,
@@ -115,17 +135,15 @@ export const useWorkspaceStore = defineStore('workspace', {
     async duplicateArtboard(id: string): Promise<Artboard | null> {
       const src = this.findArtboard(id)
       if (!src) return null
-      const now = Date.now()
-      const copy: Artboard = {
-        ...JSON.parse(JSON.stringify(src)),
-        id: uid('board'),
-        title: `${src.title} 副本`,
-        parent: src.id,
-        x: src.x + 48,
-        y: src.y + 48,
-        createdAt: now,
-        updatedAt: now,
-      }
+      const copy = cloneArtboard(src, src.projectId, { title: `${src.title} 副本`, parent: src.id })
+      this.artboards.push(copy)
+      await db.putArtboard(copy)
+      return copy
+    },
+
+    /** 从剪贴板快照粘贴画板（含全部版本），连续粘贴自动级联偏移 */
+    async pasteArtboard(snap: Artboard): Promise<Artboard> {
+      const copy = cloneArtboard(snap, this.currentProjectId!, { parent: undefined })
       this.artboards.push(copy)
       await db.putArtboard(copy)
       return copy

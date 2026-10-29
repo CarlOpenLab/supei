@@ -1,6 +1,6 @@
 import type { ChatMessage, ElementContext, ProviderConfig } from '@/types'
 import { extractHtml, looksLikeCompleteHtml } from '@/utils/html'
-import { streamChat } from './llm'
+import { streamCompletion } from './llm'
 import { DEMO_PALETTES, streamDemo, streamDemoDiff } from './demo'
 import { pluginRegistry } from '@/plugins/registry'
 
@@ -82,10 +82,7 @@ async function advisorStyle(opts: GenerateOptions): Promise<string> {
   const isDemo = !opts.provider || opts.provider.id === 'demo'
   if (isDemo) return DEMO_ADVISOR_STYLE
   let acc = ''
-  for await (const delta of streamChat({
-    baseURL: opts.provider!.baseURL,
-    apiKey: opts.provider!.apiKey,
-    model: opts.provider!.model,
+  for await (const delta of streamCompletion(opts.provider!, {
     messages: [
       { role: 'system', content: ADVISOR_PROMPT },
       { role: 'user', content: `页面需求：\n${opts.prompt}\n\n请为它现场设计风格指令。` },
@@ -147,7 +144,12 @@ export interface SearchReplaceBlock {
   replace: string
 }
 
-function describeElement(ctx: ElementContext): string {
+/**
+ * @description 把点选元素描述成提示词片段（选择器、标签、文本、HTML 片段），生成与 Agent 改代码共用。
+ * @param ctx - bridge 上报的元素上下文
+ * @returns 多行描述文本
+ */
+export function describeElement(ctx: ElementContext): string {
   const lines = [
     `- selector: ${ctx.selector}`,
     `- 标签: ${ctx.tag}${ctx.classes.length ? ` .${ctx.classes.join('.')}` : ''}`,
@@ -340,12 +342,9 @@ export async function generatePrototype(opts: GenerateOptions): Promise<Generate
   if (!opts.isNew) {
     try {
       const raw = await streamInto(
-        streamChat({
-          baseURL: opts.provider!.baseURL,
-          apiKey: opts.provider!.apiKey,
-          model: opts.provider!.model,
+        streamCompletion(opts.provider!, {
           messages: [
-            { role: 'system', content: systemPromptFor(effectiveOpts, true) },
+            { role: 'system', content: systemPromptFor(effectiveOpts, true, styleOverride) },
             { role: 'user', content: buildDiffUserContent(opts) },
           ],
           signal: opts.signal,
@@ -368,7 +367,7 @@ export async function generatePrototype(opts: GenerateOptions): Promise<Generate
 
   // —— 全量生成（新建 / 增量失败的回退）——
   const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-    { role: 'system', content: systemPromptFor(effectiveOpts) },
+    { role: 'system', content: systemPromptFor(effectiveOpts, false, styleOverride) },
   ]
   for (const m of opts.recent ?? []) {
     messages.push({
@@ -379,10 +378,7 @@ export async function generatePrototype(opts: GenerateOptions): Promise<Generate
   messages.push({ role: 'user', content: buildFullUserContent(opts) })
 
   const raw = await streamInto(
-    streamChat({
-      baseURL: opts.provider!.baseURL,
-      apiKey: opts.provider!.apiKey,
-      model: opts.provider!.model,
+    streamCompletion(opts.provider!, {
       messages,
       signal: opts.signal,
       reasoningEffort: opts.reasoningEffort,

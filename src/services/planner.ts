@@ -1,8 +1,8 @@
-import type { PlanPayload, PlanStyle } from '@/types'
-import { streamChat } from './llm'
+import type { PlanPayload, PlanStyle, ProviderConfig } from '@/types'
+import { streamCompletion } from './llm'
 
 export interface PlanOptions {
-  provider: { id: string; baseURL: string; apiKey: string; model: string } | null
+  provider: ProviderConfig | null
   prompt: string
   reasoningEffort?: string
   signal: AbortSignal
@@ -71,10 +71,7 @@ export async function planIteration(
     }
   }
   let acc = ''
-  for await (const delta of streamChat({
-    baseURL: provider.baseURL,
-    apiKey: provider.apiKey,
-    model: provider.model,
+  for await (const delta of streamCompletion(provider, {
     messages: [
       { role: 'system', content: ITERATION_PROMPT },
       { role: 'user', content: `【当前页面 HTML（节选）】
@@ -141,10 +138,7 @@ export async function planPrototype(opts: PlanOptions): Promise<PlanPayload> {
   if (!provider || provider.id === 'demo') return DEMO_PLAN
 
   let acc = ''
-  for await (const delta of streamChat({
-    baseURL: provider.baseURL,
-    apiKey: provider.apiKey,
-    model: provider.model,
+  for await (const delta of streamCompletion(provider, {
     messages: [
       { role: 'system', content: PLANNER_PROMPT },
       { role: 'user', content: `页面需求：\n${opts.prompt}` },

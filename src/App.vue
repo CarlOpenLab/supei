@@ -2,28 +2,29 @@
 import { onMounted } from 'vue'
 import { ConfigProvider, theme } from 'antdv-next'
 import zhCN from 'antdv-next/locale/zh_CN'
-import { autoLoadDesktopPlugins } from '@/services/desktop'
+import { autoLoadDesktopPlugins, watchDesktopPluginDir } from '@/services/desktop'
 
 onMounted(() => {
   autoLoadDesktopPlugins()
+  watchDesktopPluginDir()
 })
 
 const themeConfig = {
   algorithm: theme.darkAlgorithm,
   token: {
-    colorPrimary: '#ff6b47',
-    colorInfo: '#ff6b47',
-    colorBgBase: '#0d0f11',
-    colorBgContainer: '#15171b',
-    colorBgElevated: '#1b1e23',
+    colorPrimary: '#b05cf2',
+    colorInfo: '#b05cf2',
+    colorBgBase: '#0d0d0d',
+    colorBgContainer: '#161616',
+    colorBgElevated: '#1c1c1c',
     colorBorder: 'rgba(255, 255, 255, 0.09)',
     colorBorderSecondary: 'rgba(255, 255, 255, 0.06)',
-    colorText: 'rgba(255, 255, 255, 0.92)',
+    colorText: 'rgba(255, 255, 255, 0.95)',
     colorTextSecondary: 'rgba(255, 255, 255, 0.6)',
     colorTextTertiary: 'rgba(255, 255, 255, 0.38)',
     borderRadius: 8,
     fontFamily:
-      '-apple-system, \'SF Pro Text\', \'PingFang SC\', \'Microsoft YaHei\', \'Segoe UI\', sans-serif',
+      '\'Inter\', -apple-system, \'SF Pro Text\', \'PingFang SC\', \'Microsoft YaHei\', \'Segoe UI\', sans-serif',
   },
 }
 </script>

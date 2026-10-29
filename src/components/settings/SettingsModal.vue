@@ -13,10 +13,12 @@ import {
   message,
 } from 'antdv-next'
 import { DEMO_PROVIDER, useSettingsStore } from '@/stores/settings'
-import type { ProviderConfig } from '@/types'
+import type { ProviderConfig, ProviderKind } from '@/types'
 import { pluginRegistry, parsePluginFile } from '@/plugins/registry'
 import type { DesignPlugin, PluginKind } from '@/plugins/types'
-import { getDesktopBridge, IS_DESKTOP } from '@/services/desktop'
+import { desktopAvailable, getDesktopBridge, IS_DESKTOP } from '@/services/desktop'
+import { isAgentProvider } from '@/services/llm'
+import type { AgentInfo } from '@/services/mygo-client'
 import { uid } from '@/utils/id'
 import AppIcon from '@/components/ui/AppIcon.vue'
 
@@ -37,16 +39,56 @@ watch(
     if (!open) return
     draft.value = settings.providers
       .filter((p) => p.id !== DEMO_PROVIDER.id)
-      .map((p) => ({ ...p }))
+      .map((p) => ({ ...p, kind: p.kind ?? 'openai' }))
     activeId.value = settings.activeId
     closeEditor()
+    if (desktopAvailable.value) void detectAgents()
   },
 )
 
+// —— 本机 Agent（仅桌面端）——
+const AGENT_LABEL: Record<Exclude<ProviderKind, 'openai'>, { name: string; bin: string; modelHint: string }> = {
+  'claude-code': { name: 'Claude Code', bin: 'claude', modelHint: '留空用 CLI 默认，如 sonnet / opus' },
+  codex: { name: 'Codex', bin: 'codex', modelHint: '留空用 CLI 默认，如 gpt-5-codex' },
+}
+const providerKindOptions = computed(() => [
+  { label: 'OpenAI 兼容接口', value: 'openai' },
+  ...(desktopAvailable.value
+    ? (Object.keys(AGENT_LABEL) as Array<keyof typeof AGENT_LABEL>).map((k) => ({
+        label: `${AGENT_LABEL[k].name}（本机 Agent）`,
+        value: k,
+      }))
+    : []),
+])
+
+/** 本机 Agent 探测结果；null = 尚未探测完成 */
+const agents = ref<AgentInfo[] | null>(null)
+
+/**
+ * @description 探测本机已安装的 Agent CLI（claude / codex），用于在服务商卡片上显示是否可用及版本。
+ * @returns 探测完成后写入 agents
+ */
+async function detectAgents(): Promise<void> {
+  agents.value = null
+  const bridge = await getDesktopBridge()
+  if (!bridge) return
+  agents.value = await bridge.Agent.detect()
+}
+
+/**
+ * @description 选中 Agent 类型时补全默认名称，免去手填。
+ * @param p - 正在编辑的服务商草稿
+ */
+function onKindChange(p: ProviderConfig) {
+  if (isAgentProvider(p) && !p.name.trim()) p.name = AGENT_LABEL[p.kind].name
+}
+
 function save() {
-  const valid = draft.value.filter((p) => p.name.trim() && p.baseURL.trim() && p.model.trim())
+  const valid = draft.value.filter(
+    (p) => p.name.trim() && (isAgentProvider(p) || (p.baseURL.trim() && p.model.trim())),
+  )
   if (valid.length !== draft.value.length) {
-    message.warning('存在未填写完整的服务商（需要名称、baseURL、模型名），已自动忽略')
+    message.warning('存在未填写完整的服务商（OpenAI 兼容接口需要名称、baseURL、模型名），已自动忽略')
   }
   settings.providers = [DEMO_PROVIDER, ...valid]
   settings.activeId = valid.some((p) => p.id === activeId.value) ? activeId.value : 'demo'
@@ -70,7 +112,7 @@ watch(
 )
 
 function addProvider() {
-  draft.value.push({ id: uid('prov'), name: '', baseURL: '', apiKey: '', model: '' })
+  draft.value.push({ id: uid('prov'), kind: 'openai', name: '', baseURL: '', apiKey: '', model: '' })
 }
 
 function removeProvider(id: string) {
@@ -231,6 +273,18 @@ async function onImportFiles(e: Event) {
   )
 }
 
+/** 桌面壳：重新读取插件目录（~/.config/ai-design-canvas/plugins） */
+async function refreshFromDir() {
+  const bridge = await getDesktopBridge()
+  if (!bridge) return
+  const files = await bridge.Storage.readPluginDir()
+  if (!files?.length) {
+    message.info('插件目录为空：把 .md / .json 插件包放进去后点刷新')
+    return
+  }
+  await applyImport(files.map((f) => ({ name: f.name, text: f.content })))
+}
+
 async function importViaDesktop() {
   const bridge = await getDesktopBridge()
   if (!bridge) return
@@ -305,24 +359,51 @@ const kindOptions = (['style', 'preset', 'template'] as PluginKind[]).map((k) =>
               </label>
               <Button size="small" danger type="text" @click="removeProvider(p.id)">删除</Button>
             </div>
-            <div class="grid2">
+            <label v-if="providerKindOptions.length > 1 || isAgentProvider(p)">
+              <span>类型</span>
+              <Select v-model:value="p.kind" :options="providerKindOptions" @change="onKindChange(p)" />
+            </label>
+            <template v-if="isAgentProvider(p)">
+              <div class="grid2">
+                <label>
+                  <span>名称</span>
+                  <Input v-model:value="p.name" :placeholder="AGENT_LABEL[p.kind].name" />
+                </label>
+                <label>
+                  <span>模型（可选）</span>
+                  <Input v-model:value="p.model" :placeholder="AGENT_LABEL[p.kind].modelHint" />
+                </label>
+              </div>
+              <p v-if="!desktopAvailable" class="agent-status bad">本机 Agent 仅在桌面端可用</p>
+              <p v-else-if="agents === null" class="agent-status">正在检测 {{ AGENT_LABEL[p.kind].bin }} 命令…</p>
+              <p v-else-if="agents.some((a) => a.kind === p.kind)" class="agent-status ok">
+                已检测到 {{ agents.find((a) => a.kind === p.kind)!.version || AGENT_LABEL[p.kind].bin }}，
+                使用你已登录的订阅，不消耗额外额度
+              </p>
+              <p v-else class="agent-status bad">
+                未找到 {{ AGENT_LABEL[p.kind].bin }} 命令：请先安装并登录，确保它在 PATH 中
+              </p>
+            </template>
+            <template v-else>
+              <div class="grid2">
+                <label>
+                  <span>名称</span>
+                  <Input v-model:value="p.name" placeholder="如：智谱 GLM" />
+                </label>
+                <label>
+                  <span>模型名</span>
+                  <Input v-model:value="p.model" placeholder="如：glm-4.7" />
+                </label>
+              </div>
               <label>
-                <span>名称</span>
-                <Input v-model:value="p.name" placeholder="如：智谱 GLM" />
+                <span>Base URL（OpenAI 兼容，以 /v1 结尾）</span>
+                <Input v-model:value="p.baseURL" placeholder="open.bigmodel.cn/api/paas/v4" />
               </label>
               <label>
-                <span>模型名</span>
-                <Input v-model:value="p.model" placeholder="如：glm-4.7" />
+                <span>API Key</span>
+                <InputPassword v-model:value="p.apiKey" placeholder="sk-…" />
               </label>
-            </div>
-            <label>
-              <span>Base URL（OpenAI 兼容，以 /v1 结尾）</span>
-              <Input v-model:value="p.baseURL" placeholder="open.bigmodel.cn/api/paas/v4" />
-            </label>
-            <label>
-              <span>API Key</span>
-              <InputPassword v-model:value="p.apiKey" placeholder="sk-…" />
-            </label>
+            </template>
           </div>
 
           <Button type="dashed" block @click="addProvider">＋ 添加服务商</Button>
@@ -330,6 +411,7 @@ const kindOptions = (['style', 'preset', 'template'] as PluginKind[]).map((k) =>
           <div class="tips">
             <p>· 兼容所有提供 OpenAI 接口的服务商：智谱、DeepSeek、OpenAI 等。</p>
             <p>· Key 仅保存在本机浏览器（localStorage），请求由浏览器直连服务商。</p>
+            <p v-if="desktopAvailable">· 桌面端可选「本机 Agent」：直接调用已登录的 Claude Code / Codex，生成与写回代码都用你自己的订阅。</p>
           </div>
         </div>
       </TabPane>
@@ -346,6 +428,7 @@ const kindOptions = (['style', 'preset', 'template'] as PluginKind[]).map((k) =>
               <input type="file" accept=".md,.json,.txt" multiple @change="onImportFiles" />
             </label>
             <Button size="small" @click="exportAll">导出全部</Button>
+            <Button v-if="IS_DESKTOP" size="small" @click="refreshFromDir">从插件目录刷新</Button>
             <span class="toolbar-hint">.md 风格包 / .json 插件包，导入即用</span>
           </div>
 
@@ -436,9 +519,11 @@ const kindOptions = (['style', 'preset', 'template'] as PluginKind[]).map((k) =>
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border: 1px solid var(--line);
+  border: none;
   border-radius: 10px;
-  padding: 10px 14px;
+  box-shadow: inset 0 0 0 1px var(--line);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 11px 14px;
 }
 .demo-row p {
   margin: 2px 0 0;
@@ -454,8 +539,10 @@ const kindOptions = (['style', 'preset', 'template'] as PluginKind[]).map((k) =>
   white-space: nowrap;
 }
 .provider-card {
-  border: 1px solid var(--line);
+  border: none;
   border-radius: 10px;
+  box-shadow: inset 0 0 0 1px var(--line);
+  background: rgba(255, 255, 255, 0.02);
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
@@ -493,6 +580,17 @@ label span {
   font-size: 12px;
   color: var(--ink-3);
   line-height: 1.7;
+}
+.agent-status {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.agent-status.ok {
+  color: var(--accent);
+}
+.agent-status.bad {
+  color: var(--spark);
 }
 .tips p {
   margin: 0;
