@@ -1,8 +1,8 @@
-# AI Design Canvas
+# Supei — AI Design Canvas
 
 English | [简体中文](README_ZH.md)
 
-Design web UIs with AI on an infinite canvas. Chat to generate HTML prototypes with live streaming preview, click any element for targeted feedback, compare variants side by side, and export a single-file interactive preview when the design settles — pulling "what should it look like" out of the AI coding loop: discuss first, implement later.
+**Supei** is an infinite-canvas AI design tool. Chat to generate HTML prototypes with live streaming preview, click any element for targeted feedback, compare variants side by side, and export a single-file interactive preview when the design settles — pulling "what should it look like" out of the AI coding loop: discuss first, implement later.
 
 The interface follows the [wonder.design](https://wonder.design) language: layered near-black surfaces, Inter / Uncut Sans / JetBrains Mono, purple accent buttons, hairline strokes, frosted-glass overlays. The AI side ships a distilled design methodology (tokens first, type scale, restrained palettes, asymmetric composition, CJK typesetting discipline, an anti-AI-template checklist) plus **9 built-in design styles** — **Auto / Editorial Magazine / Dark Tech / Swiss International / Warm & Friendly / Neo-Brutalism / Wabi-Sabi Minimal / Linear Dark SaaS / Bauhaus Composition** — hard constraints applied to both full generation and incremental iteration.
 
