@@ -6,7 +6,9 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "build:desktop": "vue-tsc --noEmit && vite build --mode desktop"
+    "build:desktop": "vue-tsc --noEmit && vite build --mode desktop",
+    "desktop": "npm run dev --prefix desktop",
+    "desktop:build": "npm run build --prefix desktop"
   },
   "keywords": [],
   "author": "",

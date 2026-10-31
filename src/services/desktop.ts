@@ -14,6 +14,7 @@ export type MygoBridge = {
   Agent: typeof import('./mygo-client').AgentService
   DevServer: typeof import('./mygo-client').DevServerService
   Share: typeof import('./mygo-client').ShareService
+  Sys: typeof import('./mygo-client').SysService
 }
 
 /** 桌面桥接是否真实可用（Web 版恒为 false）。UI 据此显示 Agent / 仓库预览 / 分享等桌面专属入口。 */
@@ -41,6 +42,7 @@ export function getDesktopBridge(): Promise<MygoBridge | null> {
           Agent: client.AgentService,
           DevServer: client.DevServerService,
           Share: client.ShareService,
+          Sys: client.SysService,
         }
       })
       .catch((err) => {

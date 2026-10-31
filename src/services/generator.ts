@@ -1,15 +1,7 @@
 import type { ChatMessage, ElementContext, ProviderConfig } from '@/types'
 import { extractHtml, looksLikeCompleteHtml } from '@/utils/html'
 import { streamCompletion } from './llm'
-import { DEMO_PALETTES, streamDemo, streamDemoDiff } from './demo'
 import { pluginRegistry } from '@/plugins/registry'
-
-/** 从演示 HTML 的 --accent 色值反推 seed（兼容未记录 demoSeed 的旧版本） */
-function inferDemoSeed(html: string): number {
-  const m = html.match(/--accent:\s*(#[0-9a-fA-F]{6})/)
-  const idx = m ? DEMO_PALETTES.indexOf(m[1].toLowerCase()) : -1
-  return idx >= 0 ? idx : 0
-}
 
 export const AI_STYLE_ID = "style:ai"
 
@@ -58,15 +50,6 @@ const ADVISOR_PROMPT = `你是一位以打破常规著称的设计总监。根�
 4. 最后一行以「- 禁止：」开头，列出 2-3 条该风格明确不允许出现的东西。
 5. 只输出风格指令本身，不要任何开场白或解释。`
 
-/** 演示模式的顾问输出（不调网络）。 */
-const DEMO_ADVISOR_STYLE = `【设计风格：暖纸工作室（Studio Paper）】
-- 底色用未涂布纸的暖白 #F5F2EB，墨色文字 #26251F，正文行高 1.8。
-- 主色取陶土橙 #C4572E，只用于一处标题下划线与主按钮，面积 < 5%。
-- 标题用衬线（Georgia + 宋体栈），字号阶梯 56/32/18/14，大标题字距 -0.01em。
-- 构图采用 8:4 非对称双栏，左文右图，图片占位用同色系深一档的纯色块。
-- 组件直角化：圆角 2px，分隔用 0.5px 墨色细线，不用阴影。
-- 禁止：渐变、emoji 图标、居中对称的英雄区、均分三列卡片。`
-
 /** 剥掉模型回复可能带上的 markdown 围栏。 */
 function stripFences(text: string): string {
   let s = text.trim()
@@ -79,10 +62,9 @@ function stripFences(text: string): string {
 
 /** AI 风格顾问：让模型根据需求现场设计一段风格指令。 */
 async function advisorStyle(opts: GenerateOptions): Promise<string> {
-  const isDemo = !opts.provider || opts.provider.id === 'demo'
-  if (isDemo) return DEMO_ADVISOR_STYLE
+  if (!opts.provider) throw new Error('未配置模型：请到「设置 → 模型设置」选择服务商')
   let acc = ''
-  for await (const delta of streamCompletion(opts.provider!, {
+  for await (const delta of streamCompletion(opts.provider, {
     messages: [
       { role: 'system', content: ADVISOR_PROMPT },
       { role: 'user', content: `页面需求：\n${opts.prompt}\n\n请为它现场设计风格指令。` },
@@ -110,7 +92,7 @@ const DIFF_PROTOCOL = `你现在处于「增量修改」模式。不要输出完
 4. 未被修改的内容不要出现在输出中。`
 
 export interface GenerateOptions {
-  /** 为空或 id === 'demo' 时走内置演示模式 */
+  /** 未配置时 generatePrototype 直接抛错，由调用方提示 */
   provider: ProviderConfig | null
   isNew: boolean
   /** 设计风格预设 id（plugins registry）；'ai' 表示由 AI 现场生成风格指令 */
@@ -124,8 +106,6 @@ export interface GenerateOptions {
   elementContext?: ElementContext | null
   recent?: Pick<ChatMessage, 'role' | 'content'>[]
   sizeHint?: string
-  /** 演示模式种子：新建时为方案序号，迭代时为当前版本序号 */
-  demoSeed?: number
   signal: AbortSignal
   /** 流式过程中的中间 HTML（已清洗）；diff 模式的中间态不会回调 */
   onStreamingHtml: (html: string) => void
@@ -135,8 +115,6 @@ export interface GenerateResult {
   html: string
   /** diff = 增量应用成功；full = 全量生成；fallback = 增量失败后回退全量 */
   mode: 'diff' | 'full' | 'fallback'
-  /** 演示模式下新版本的种子（迭代路径为 fromSeed + 1），供版本记录追溯 */
-  demoSeed?: number
 }
 
 export interface SearchReplaceBlock {
@@ -306,10 +284,9 @@ async function streamInto(
   return acc
 }
 
-/** 执行一次原型生成（真实模型或演示模式）。迭代优先走增量，失败自动回退全量。 */
+/** 执行一次原型生成。迭代优先走增量，失败自动回退全量。 */
 export async function generatePrototype(opts: GenerateOptions): Promise<GenerateResult> {
-  const isDemo = !opts.provider || opts.provider.id === 'demo'
-  const seed = opts.demoSeed ?? 0
+  if (!opts.provider) throw new Error('未配置模型：请到「设置 → 模型设置」选择服务商')
 
   // —— AI 风格顾问：由模型根据需求现场设计风格指令 ——
   let styleOverride = ''
@@ -321,28 +298,11 @@ export async function generatePrototype(opts: GenerateOptions): Promise<Generate
   }
   const effectiveOpts = styleOverride ? { ...opts, styleId: undefined } : opts
 
-  // —— 演示模式 ——
-  if (isDemo) {
-    if (!opts.isNew) {
-      const from = opts.demoSeed ?? inferDemoSeed(opts.currentHtml ?? '')
-      const raw = await streamInto(streamDemoDiff(from, from + 1, opts.signal), effectiveOpts, false)
-      const blocks = parseSearchReplace(raw)
-      const html = applySearchReplace(opts.currentHtml ?? '', blocks)
-      opts.onStreamingHtml(html)
-      return { html, mode: 'diff', demoSeed: from + 1 }
-    }
-    const raw = await streamInto(streamDemo(seed, opts.signal), effectiveOpts, true)
-    const html = extractHtml(raw)
-    opts.onStreamingHtml(html)
-    if (!html || !/<[a-z!]/i.test(html)) throw new Error('没有生成有效的 HTML 内容')
-    return { html, mode: 'full', demoSeed: seed }
-  }
-
   // —— 真实模型：迭代先尝试增量 ——
   if (!opts.isNew) {
     try {
       const raw = await streamInto(
-        streamCompletion(opts.provider!, {
+        streamCompletion(opts.provider, {
           messages: [
             { role: 'system', content: systemPromptFor(effectiveOpts, true, styleOverride) },
             { role: 'user', content: buildDiffUserContent(opts) },
@@ -378,7 +338,7 @@ export async function generatePrototype(opts: GenerateOptions): Promise<Generate
   messages.push({ role: 'user', content: buildFullUserContent(opts) })
 
   const raw = await streamInto(
-    streamCompletion(opts.provider!, {
+    streamCompletion(opts.provider, {
       messages,
       signal: opts.signal,
       reasoningEffort: opts.reasoningEffort,

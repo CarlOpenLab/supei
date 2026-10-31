@@ -12,12 +12,12 @@ import {
   Popconfirm,
   message,
 } from 'antdv-next'
-import { DEMO_PROVIDER, useSettingsStore } from '@/stores/settings'
+import { useSettingsStore } from '@/stores/settings'
 import type { ProviderConfig, ProviderKind } from '@/types'
 import { pluginRegistry, parsePluginFile } from '@/plugins/registry'
 import type { DesignPlugin, PluginKind } from '@/plugins/types'
 import { desktopAvailable, getDesktopBridge, IS_DESKTOP } from '@/services/desktop'
-import { isAgentProvider } from '@/services/llm'
+import { isAgentProvider, listModels } from '@/services/llm'
 import type { AgentInfo } from '@/services/mygo-client'
 import { uid } from '@/utils/id'
 import AppIcon from '@/components/ui/AppIcon.vue'
@@ -31,15 +31,13 @@ const tab = ref('model')
 
 // —— 模型设置 ——
 const draft = ref<ProviderConfig[]>([])
-const activeId = ref('demo')
+const activeId = ref('')
 
 watch(
   () => props.open,
   (open) => {
     if (!open) return
-    draft.value = settings.providers
-      .filter((p) => p.id !== DEMO_PROVIDER.id)
-      .map((p) => ({ ...p, kind: p.kind ?? 'openai' }))
+    draft.value = settings.providers.map((p) => ({ ...p, kind: p.kind ?? 'openai' }))
     activeId.value = settings.activeId
     closeEditor()
     if (desktopAvailable.value) void detectAgents()
@@ -90,8 +88,8 @@ function save() {
   if (valid.length !== draft.value.length) {
     message.warning('存在未填写完整的服务商（OpenAI 兼容接口需要名称、baseURL、模型名），已自动忽略')
   }
-  settings.providers = [DEMO_PROVIDER, ...valid]
-  settings.activeId = valid.some((p) => p.id === activeId.value) ? activeId.value : 'demo'
+  settings.providers = valid
+  settings.activeId = valid.some((p) => p.id === activeId.value) ? activeId.value : ''
   settings.save()
   message.success('设置已保存')
   emit('update:open', false)
@@ -101,12 +99,9 @@ const defaultOptions = ref<Array<{ label: string; value: string }>>([])
 watch(
   [draft, activeId],
   () => {
-    defaultOptions.value = [
-      { label: DEMO_PROVIDER.name, value: DEMO_PROVIDER.id },
-      ...draft.value
-        .filter((p) => p.name.trim())
-        .map((p) => ({ label: p.name, value: p.id })),
-    ]
+    defaultOptions.value = draft.value
+      .filter((p) => p.name.trim())
+      .map((p) => ({ label: p.name, value: p.id }))
   },
   { deep: true },
 )
@@ -115,9 +110,47 @@ function addProvider() {
   draft.value.push({ id: uid('prov'), kind: 'openai', name: '', baseURL: '', apiKey: '', model: '' })
 }
 
+// —— 快捷预设：一键填好常用服务商 / 本地网关，字段仍可随意改 ——
+const PROVIDER_PRESETS: Array<{ label: string; name: string; baseURL: string; model: string }> = [
+  { label: '智谱 GLM', name: '智谱 GLM', baseURL: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4.7' },
+  { label: 'DeepSeek', name: 'DeepSeek', baseURL: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+  { label: 'OpenAI', name: 'OpenAI', baseURL: 'https://api.openai.com/v1', model: 'gpt-4o' },
+  // Magpie（github.com/yetone/magpie）本地网关默认监听 127.0.0.1:3425，OpenAI 协议走 /v1，通常无需 Key
+  { label: 'Magpie 本地网关', name: 'Magpie 本地网关', baseURL: 'http://127.0.0.1:3425/v1', model: '' },
+]
+
+function addPreset(preset: (typeof PROVIDER_PRESETS)[number]) {
+  draft.value.push({ id: uid('prov'), kind: 'openai', name: preset.name, baseURL: preset.baseURL, apiKey: '', model: preset.model })
+}
+
+// —— 模型列表：从网关拉取真实模型 ID，点选填入（仍可手动输入任意模型名）——
+const modelChoices = ref<Record<string, string[]>>({})
+const fetchingModels = ref<Record<string, boolean>>({})
+
+async function fetchModels(p: ProviderConfig) {
+  if (!p.baseURL.trim()) {
+    message.warning('先填 Base URL 再获取模型列表')
+    return
+  }
+  fetchingModels.value[p.id] = true
+  try {
+    const list = await listModels(p.baseURL.trim(), p.apiKey.trim())
+    if (!list.length) {
+      message.warning('网关返回了空列表，请手动填写模型名')
+      return
+    }
+    modelChoices.value[p.id] = list
+    message.success(`获取到 ${list.length} 个模型，点击即可选用`)
+  } catch (err) {
+    message.error(`获取失败：${(err as Error).message}`)
+  } finally {
+    fetchingModels.value[p.id] = false
+  }
+}
+
 function removeProvider(id: string) {
   draft.value = draft.value.filter((p) => p.id !== id)
-  if (activeId.value === id) activeId.value = 'demo'
+  if (activeId.value === id) activeId.value = ''
 }
 
 // —— 插件库 ——
@@ -339,16 +372,9 @@ const kindOptions = (['style', 'preset', 'template'] as PluginKind[]).map((k) =>
     <Tabs v-model:activeKey="tab" size="small">
       <TabPane key="model" tab="模型设置">
         <div class="settings-body">
-          <div class="demo-row">
-            <div>
-              <b>{{ DEMO_PROVIDER.name }}</b>
-              <p>内置样例原型，不调用网络，用于快速体验完整流程。</p>
-            </div>
-            <label class="radio">
-              <input v-model="activeId" type="radio" value="demo" />
-              使用
-            </label>
-          </div>
+          <p v-if="!draft.length" class="empty-hint">
+            还没有配置模型：点下方「快速添加」选一个服务商，或用 Magpie 本地网关，填好 Base URL 与 Key 即可。
+          </p>
 
           <div v-for="(p, i) in draft" :key="p.id" class="provider-card">
             <div class="card-head">
@@ -391,8 +417,30 @@ const kindOptions = (['style', 'preset', 'template'] as PluginKind[]).map((k) =>
                   <Input v-model:value="p.name" placeholder="如：智谱 GLM" />
                 </label>
                 <label>
-                  <span>模型名</span>
-                  <Input v-model:value="p.model" placeholder="如：glm-4.7" />
+                  <span class="span-row">
+                    模型名
+                    <button
+                      type="button"
+                      class="fetch-btn"
+                      :disabled="fetchingModels[p.id] || !p.baseURL.trim()"
+                      @click="fetchModels(p)"
+                    >
+                      {{ fetchingModels[p.id] ? '获取中…' : '从网关获取' }}
+                    </button>
+                  </span>
+                  <Input v-model:value="p.model" placeholder="如：glm-4.7；本地网关可点上方按钮拉取" />
+                  <div v-if="modelChoices[p.id]?.length" class="model-choices">
+                    <button
+                      v-for="m in modelChoices[p.id]"
+                      :key="m"
+                      type="button"
+                      class="model-tag"
+                      :class="{ on: p.model === m }"
+                      @click="p.model = m"
+                    >
+                      {{ m }}
+                    </button>
+                  </div>
                 </label>
               </div>
               <label>
@@ -406,11 +454,18 @@ const kindOptions = (['style', 'preset', 'template'] as PluginKind[]).map((k) =>
             </template>
           </div>
 
+          <div class="preset-row">
+            <span class="micro-label">快速添加</span>
+            <Button v-for="preset in PROVIDER_PRESETS" :key="preset.label" size="small" @click="addPreset(preset)">
+              {{ preset.label }}
+            </Button>
+          </div>
           <Button type="dashed" block @click="addProvider">＋ 添加服务商</Button>
 
           <div class="tips">
-            <p>· 兼容所有提供 OpenAI 接口的服务商：智谱、DeepSeek、OpenAI 等。</p>
-            <p>· Key 仅保存在本机浏览器（localStorage），请求由浏览器直连服务商。</p>
+            <p>· 兼容所有提供 OpenAI 接口的服务商；本地网关（如 <code>Magpie</code>，默认 <code>http://127.0.0.1:3425/v1</code>）同样适用，通常无需 Key。</p>
+            <p>· 模型名可手填任意值，也可点「从网关获取」拉取真实模型列表后点选。</p>
+            <p>· Key 仅保存在本机（localStorage），桌面端请求由 Go 代理发出，无浏览器跨域限制。</p>
             <p v-if="desktopAvailable">· 桌面端可选「本机 Agent」：直接调用已登录的 Claude Code / Codex，生成与写回代码都用你自己的订阅。</p>
           </div>
         </div>
@@ -515,20 +570,15 @@ const kindOptions = (['style', 'preset', 'template'] as PluginKind[]).map((k) =>
   overflow-y: auto;
   padding-right: 4px;
 }
-.demo-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border: none;
+.empty-hint {
+  margin: 0;
+  padding: 11px 14px;
   border-radius: 10px;
   box-shadow: inset 0 0 0 1px var(--line);
   background: rgba(255, 255, 255, 0.02);
-  padding: 11px 14px;
-}
-.demo-row p {
-  margin: 2px 0 0;
   font-size: 12px;
-  color: var(--ink-3);
+  color: var(--ink-2);
+  line-height: 1.7;
 }
 .radio {
   display: flex;
@@ -558,14 +608,65 @@ const kindOptions = (['style', 'preset', 'template'] as PluginKind[]).map((k) =>
   font-size: 13px;
   color: var(--ink);
 }
-.demo-row b {
-  font-size: 13px;
-  color: var(--ink);
-}
 .grid2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+}
+.preset-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.preset-row .micro-label {
+  margin-right: auto;
+}
+.span-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.fetch-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+}
+.fetch-btn:disabled {
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+.model-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.model-tag {
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: none;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--ink-2);
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-tag:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.model-tag.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--bg-raised);
 }
 label {
   display: flex;

@@ -11,8 +11,6 @@ export interface Version {
   createdAt: number
   /** 产生该版本的用户消息 id，可溯源 */
   sourceMessageId?: string
-  /** 演示模式种子，迭代时用于推导下一个配色 */
-  demoSeed?: number
 }
 
 export interface ElementRect {

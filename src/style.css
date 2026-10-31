@@ -1,6 +1,6 @@
 /* ============================================================
    AI 原型画布 — Wonder 设计语言
-   对齐 wonder.design：中性近黑分层、发丝描边、紫色高光、
+   对齐 wonder.design：中性近黑分层、发丝描边、蓝色高光（antd 主色）、
    Inter + Uncut Sans 紧排标题、JetBrains Mono 微标签。
    所有表面同属一个深度体系。
    ============================================================ */
@@ -48,10 +48,10 @@
   --ink-2: rgba(255, 255, 255, 0.6);
   --ink-3: rgba(255, 255, 255, 0.38);
 
-  /* 强调：wonder 紫（oklab 0.54 / 0.145 / -0.146） */
-  --accent: #b05cf2;
-  --accent-deep: #9d49e0;
-  --accent-soft: rgba(176, 92, 242, 0.14);
+  /* 强调：antdv-next 默认蓝（daybreak blue） */
+  --accent: #1677ff;
+  --accent-deep: #0958d9;
+  --accent-soft: rgba(22, 119, 255, 0.14);
 
   /* 次强调：余烬橙（logo 火花，仅点缀） */
   --spark: #ff6b47;
@@ -171,7 +171,7 @@ body {
 }
 
 ::selection {
-  background: rgba(176, 92, 242, 0.32);
+  background: rgba(22, 119, 255, 0.32);
 }
 
 /* —— 浮层质感：发丝环 + 深投影（Modal / Popover / 下拉） —— */
@@ -181,6 +181,16 @@ body {
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.08),
     0 24px 64px rgba(0, 0, 0, 0.6);
+  /* 超高内容不再撑破视口：内容区 75vh 封顶，body 内置滚动 */
+  display: flex;
+  flex-direction: column;
+  max-height: 75vh;
+  overflow: hidden;
+}
+.ant-modal .ant-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 .ant-modal-mask {
   background: rgba(0, 0, 0, 0.6) !important;
@@ -209,7 +219,7 @@ body {
   background: rgba(255, 255, 255, 0.06) !important;
 }
 .ant-select-item-option-selected {
-  background: rgba(176, 92, 242, 0.14) !important;
+  background: rgba(22, 119, 255, 0.14) !important;
   color: var(--accent);
 }
 

@@ -143,7 +143,7 @@ function fmtDate(ts: number): string {
   display: flex;
   flex-direction: column;
   background:
-    radial-gradient(900px 420px at 50% -8%, rgba(176, 92, 242, 0.1), transparent 62%),
+    radial-gradient(900px 420px at 50% -8%, rgba(22, 119, 255, 0.1), transparent 62%),
     radial-gradient(700px 360px at 88% 4%, rgba(255, 107, 71, 0.05), transparent 60%),
     var(--bg-canvas);
 }
@@ -334,7 +334,7 @@ function fmtDate(ts: number): string {
   border-bottom: 1px dashed var(--line-strong);
 }
 .project-row.ghost:hover {
-  background: rgba(176, 92, 242, 0.05);
+  background: rgba(22, 119, 255, 0.05);
 }
 .row-index {
   font-family: var(--mono);

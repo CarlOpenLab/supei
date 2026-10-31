@@ -12,8 +12,8 @@ onMounted(() => {
 const themeConfig = {
   algorithm: theme.darkAlgorithm,
   token: {
-    colorPrimary: '#b05cf2',
-    colorInfo: '#b05cf2',
+    colorPrimary: '#1677ff',
+    colorInfo: '#1677ff',
     colorBgBase: '#0d0d0d',
     colorBgContainer: '#161616',
     colorBgElevated: '#1c1c1c',

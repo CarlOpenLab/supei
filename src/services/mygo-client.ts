@@ -116,6 +116,14 @@ export const Greeter = {
 /** LLMService is the frontend-facing name of the streaming proxy. */
 export const LLMService = {
   /**
+   * ListModels GETs the OpenAI-compatible {baseURL}/models endpoint and returns
+   * the model ids, so the settings UI can offer real model names (e.g. from a
+   * local gateway like Magpie) instead of free text. Desktop-only CORS escape.
+   */
+  listModels(baseURL: string, apiKey: string): Promise<string[]> {
+    return call("LLMService.ListModels", baseURL, apiKey);
+  },
+  /**
    * Stream calls the OpenAI-compatible chat/completions endpoint and streams
    * token deltas to the page. Returning a non-nil error rejects the promise on
    * the frontend.
@@ -216,5 +224,17 @@ export const ShareService = {
   /** Unpublish deletes a published preview; its links return 404 afterwards. */
   unpublish(id: string): Promise<void> {
     return call("ShareService.Unpublish", id);
+  },
+} as const;
+
+/** SysService wraps small OS integrations for the frontend. */
+export const SysService = {
+  /**
+   * OpenURL opens an http(s) link in the user's default browser. Prototype
+   * links are intercepted by the bridge and routed here so the canvas iframe
+   * never navigates away ("套娃").
+   */
+  openURL(rawURL: string): Promise<void> {
+    return call("SysService.OpenURL", rawURL);
   },
 } as const;

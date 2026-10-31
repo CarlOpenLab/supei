@@ -43,7 +43,7 @@ export function buildProjectViewerHtml(projectTitle: string, boards: Artboard[])
   }
   header .mark {
     width: 20px; height: 20px; border-radius: 6px;
-    background: linear-gradient(135deg, #b05cf2 10%, #ff6b47 110%);
+    background: linear-gradient(135deg, #1677ff 10%, #ff6b47 110%);
   }
   header h1 { font-size: 14px; font-weight: 600; margin: 0; letter-spacing: -.01em; }
   header .count {
@@ -64,7 +64,7 @@ export function buildProjectViewerHtml(projectTitle: string, boards: Artboard[])
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   nav button:hover { background: rgba(255,255,255,.05); }
-  nav button.on { background: rgba(176,92,242,.14); color: #c79bf5; }
+  nav button.on { background: rgba(22,119,255,.14); color: #c79bf5; }
   nav button .idx {
     font-family: ui-monospace, Consolas, monospace; font-size: 11px;
     color: rgba(255,255,255,.35); flex: none; width: 20px;

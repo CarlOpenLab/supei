@@ -28,12 +28,6 @@ const settings = useSettingsStore()
 const settingsOpen = ref(false)
 const newBoardOpen = ref(false)
 const helpOpen = ref(false)
-const setupDismissed = ref(localStorage.getItem('dc.setup-dismissed') === '1')
-
-function dismissSetup() {
-  setupDismissed.value = true
-  localStorage.setItem('dc.setup-dismissed', '1')
-}
 
 const SIZE_PRESETS = [
   ...pluginRegistry.listByKind('template').map((t) => {
@@ -47,9 +41,7 @@ const newBoardSize = ref('1280x800')
 const customW = ref(1024)
 const customH = ref(768)
 
-const providerLabel = computed(() =>
-  settings.isDemo ? '演示模式' : settings.active.name || '未命名服务商',
-)
+const providerLabel = computed(() => settings.active?.name || '未配置模型')
 
 // —— 实时画板：打开本地仓库 / 捕获网页（仅桌面端）——
 const liveStore = useLiveStore()
@@ -236,7 +228,7 @@ async function createBoard() {
         {{ ws.currentProject?.name || '…' }}
       </span>
       <span class="flex1" />
-      <span class="provider-chip" :class="{ demo: settings.isDemo }">{{ providerLabel }}</span>
+      <span class="provider-chip">{{ providerLabel }}</span>
       <button class="bar-btn" title="全部画板导出为单文件交互式预览页" @click="exportProjectViewer">
         <AppIcon name="share" :size="13" /> 导出预览
       </button>
@@ -292,16 +284,6 @@ async function createBoard() {
         <p class="help-note">提示：画板获得焦点时（点过画板内部），快捷键由 webview 内部转发，行为一致。</p>
       </div>
     </Modal>
-
-    <div v-if="settings.isDemo && !setupDismissed" class="setup-banner">
-      <AppIcon name="sparkle" :size="13" class="banner-icon" />
-      <span class="banner-text">
-        当前为<b>演示模式</b>。在「设置 → 模型设置」里配置一个真实模型 Key（任意 OpenAI 兼容服务商，
-        如智谱 <code>open.bigmodel.cn/api/paas/v4</code>），即可解锁 AI 规划、深度思考与真实生成。
-      </span>
-      <button class="banner-btn" @click="settingsOpen = true">去配置</button>
-      <button class="banner-close" title="不再提示" @click="dismissSetup">×</button>
-    </div>
 
     <div class="canvas-body">
       <ChatPanel />
@@ -440,11 +422,6 @@ async function createBoard() {
   box-shadow: var(--btn-quiet-shadow);
   color: var(--ink-2);
 }
-.provider-chip.demo {
-  color: var(--accent);
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px rgba(176, 92, 242, 0.4);
-}
 .bar-btn {
   display: inline-flex;
   align-items: center;
@@ -469,63 +446,6 @@ async function createBoard() {
 }
 .flex1 {
   flex: 1;
-}
-.setup-banner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 16px;
-  background: linear-gradient(90deg, rgba(176, 92, 242, 0.14), rgba(176, 92, 242, 0.05));
-  border-bottom: 1px solid rgba(176, 92, 242, 0.3);
-  font-size: 12.5px;
-  color: var(--ink-2);
-}
-.banner-icon {
-  color: var(--accent);
-  flex: none;
-}
-.banner-text {
-  flex: 1;
-  min-width: 0;
-  line-height: 1.5;
-}
-.banner-text b {
-  color: var(--accent);
-}
-.banner-text code {
-  font-family: var(--mono);
-  font-size: 11px;
-  background: var(--bg-raised);
-  padding: 1px 5px;
-  border-radius: 4px;
-}
-.banner-btn {
-  flex: none;
-  border: none;
-  background: var(--btn-primary-bg);
-  box-shadow: var(--btn-primary-shadow);
-  color: #fff;
-  font-size: 12px;
-  padding: 5px 14px;
-  border-radius: var(--radius-m);
-  cursor: pointer;
-  font-family: var(--sans);
-  transition: filter var(--dur-fast) var(--ease);
-}
-.banner-btn:hover {
-  filter: brightness(1.1);
-}
-.banner-close {
-  flex: none;
-  border: none;
-  background: transparent;
-  color: var(--ink-3);
-  font-size: 15px;
-  cursor: pointer;
-  padding: 2px 6px;
-}
-.banner-close:hover {
-  color: var(--ink);
 }
 .canvas-body {
   flex: 1;

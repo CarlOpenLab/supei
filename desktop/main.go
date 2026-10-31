@@ -9,8 +9,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/egoist/mygo"
@@ -130,6 +133,72 @@ func (LLMService) Stream(ctx context.Context, opts LLMOptions, out *mygo.Channel
 		}
 	}
 	return scanner.Err()
+}
+
+// modelEntry is one entry of an OpenAI-compatible /models response.
+type modelEntry struct {
+	ID string `json:"id"`
+}
+
+type modelListResponse struct {
+	Data []modelEntry `json:"data"`
+}
+
+// ListModels GETs the OpenAI-compatible {baseURL}/models endpoint and returns
+// the model ids, so the settings UI can offer real model names (e.g. from a
+// local gateway like Magpie) instead of free text. Desktop-only CORS escape.
+func (LLMService) ListModels(ctx context.Context, baseURL string, apiKey string) ([]string, error) {
+	url := strings.TrimRight(baseURL, "/") + "/models"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("无法连接到模型服务：%w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("模型服务返回 %d：%s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	var parsed modelListResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1024*1024)).Decode(&parsed); err != nil {
+		return nil, fmt.Errorf("响应不是 OpenAI 兼容的模型列表：%w", err)
+	}
+	out := make([]string, 0, len(parsed.Data))
+	for _, m := range parsed.Data {
+		if m.ID != "" {
+			out = append(out, m.ID)
+		}
+	}
+	return out, nil
+}
+
+// —— 系统集成：原型外链用默认浏览器打开，不在画布 iframe 里跳转 ——
+
+// SysService wraps small OS integrations for the frontend.
+type SysService struct{}
+
+// OpenURL opens an http(s) link in the user's default browser. Prototype
+// links are intercepted by the bridge and routed here so the canvas iframe
+// never navigates away ("套娃").
+func (SysService) OpenURL(_ context.Context, rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Errorf("仅支持打开 http(s) 链接：%s", rawURL)
+	}
+	switch runtime.GOOS {
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", u.String()).Start()
+	case "darwin":
+		return exec.Command("open", u.String()).Start()
+	default:
+		return exec.Command("xdg-open", u.String()).Start()
+	}
 }
 
 // —— 存储：原生保存对话框 + 本地文件读取 ——
@@ -281,7 +350,7 @@ func main() {
 		os.Setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disable-gpu")
 	}
 
-	mygo.Bind(Greeter{}, LLMService{}, StorageService{}, AgentService{}, DevServerService{}, ShareService{})
+	mygo.Bind(Greeter{}, LLMService{}, StorageService{}, AgentService{}, DevServerService{}, ShareService{}, SysService{})
 
 	mygo.App.WhenReady(func() {
 		mygo.NewWindow(mygo.WindowOptions{

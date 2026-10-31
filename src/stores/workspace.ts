@@ -157,7 +157,7 @@ export const useWorkspaceStore = defineStore('workspace', {
     async addVersion(
       artboardId: string,
       html: string,
-      extra: { sourceMessageId?: string; demoSeed?: number } = {},
+      extra: { sourceMessageId?: string } = {},
     ): Promise<Version> {
       const b = this.findArtboard(artboardId)
       if (!b) throw new Error('画板不存在')
@@ -166,7 +166,6 @@ export const useWorkspaceStore = defineStore('workspace', {
         html,
         createdAt: Date.now(),
         sourceMessageId: extra.sourceMessageId,
-        demoSeed: extra.demoSeed,
       }
       b.versions.push(version)
       b.currentVersionId = version.id

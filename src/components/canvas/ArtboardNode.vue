@@ -661,19 +661,6 @@ async function doDelete() {
         <button class="ab-edits-btn primary" title="保存为新版本" @click.stop="saveEdits">保存</button>
       </span>
       <Spin v-if="isStreaming" size="small" />
-      <Tooltip :title="canvas.tool === 'comment' ? '点选反馈已开启：点击页面元素，让 AI 定向修改' : '点选反馈：点击页面元素让 AI 定向修改'">
-        <button class="tool" :class="{ on: canvas.tool === 'comment' }" @pointerdown.stop @click.stop="toggleTool('comment')">
-          <AppIcon name="cursor" :size="14" />
-        </button>
-      </Tooltip>
-      <Tooltip :title="canvas.tool === 'edit' ? '手动编辑已开启：点选元素在右侧调整，双击改字，Alt 悬停测距' : '手动编辑：像设计工具一样直接调整元素'">
-        <button class="tool" :class="{ on: canvas.tool === 'edit' }" @pointerdown.stop @click.stop="toggleTool('edit')">
-          <AppIcon name="pencil" :size="13" />
-        </button>
-      </Tooltip>
-      <button class="tool" title="画板菜单（右键画板同样打开）" @pointerdown.stop @click.stop="openMenuAt($event.clientX, $event.clientY)">
-        <AppIcon name="dots" :size="14" />
-      </button>
     </header>
 
     <div v-if="isLive" class="ab-body" :style="{ height: `${board.height - HEADER_H}px` }">
@@ -744,6 +731,24 @@ async function doDelete() {
         <div class="sk sk-line w45" />
       </div>
       <div v-if="isStreaming" class="stream-bar" />
+    </div>
+
+    <!-- 底部居中悬浮工具条：点选反馈 / 手动编辑 / 画板菜单 -->
+    <div class="ab-toolbar" @pointerdown.stop @wheel.stop>
+      <Tooltip :title="canvas.tool === 'comment' ? '点选反馈已开启：点击页面元素，让 AI 定向修改' : '点选反馈：点击页面元素让 AI 定向修改'">
+        <button class="tool" :class="{ on: canvas.tool === 'comment' }" @click.stop="toggleTool('comment')">
+          <AppIcon name="cursor" :size="14" />
+        </button>
+      </Tooltip>
+      <Tooltip :title="canvas.tool === 'edit' ? '手动编辑已开启：点选元素在右侧调整，双击改字，Alt 悬停测距' : '手动编辑：像设计工具一样直接调整元素'">
+        <button class="tool" :class="{ on: canvas.tool === 'edit' }" @click.stop="toggleTool('edit')">
+          <AppIcon name="pencil" :size="13" />
+        </button>
+      </Tooltip>
+      <span class="ab-toolbar-sep" />
+      <button class="tool" title="画板菜单（右键画板同样打开）" @click.stop="openMenuAt($event.clientX, $event.clientY)">
+        <AppIcon name="dots" :size="14" />
+      </button>
     </div>
 
     <ElementCommentBubble
@@ -987,8 +992,31 @@ button.tool:hover {
   color: var(--ink);
 }
 button.tool.on {
-  background: var(--accent-soft);
-  color: var(--accent);
+  /* 实心填充：工具选中态一眼可辨（对齐设计工具的激活样式） */
+  background: var(--accent);
+  color: #fff;
+}
+/* —— 底部居中悬浮工具条 —— */
+.ab-toolbar {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 5px;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-card);
+  z-index: 6;
+}
+.ab-toolbar-sep {
+  flex: none;
+  width: 1px;
+  height: 14px;
+  margin: 0 3px;
+  background: var(--line-strong);
 }
 /* —— 实时画板 —— */
 .live-dot {
@@ -1404,6 +1432,6 @@ button.tool.on {
 .tl-cmp:hover {
   color: var(--accent);
   background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px rgba(176, 92, 242, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.35);
 }
 </style>

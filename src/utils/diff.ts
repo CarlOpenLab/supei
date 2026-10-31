@@ -167,11 +167,11 @@ export function describeChanges(aHtml: string, bHtml: string, limit = 150): stri
 
 const DIFF_CSS = `
 [data-dc-diff]{outline-offset:-2px!important;border-radius:4px!important}
-[data-dc-diff="add"]{outline:2px dashed #b05cf2!important;background:rgba(176,92,242,.08)!important;animation:dc-pulse-p .9s ease-out 1}
-[data-dc-diff="chg"]{outline:2px solid #b05cf2!important;background:rgba(176,92,242,.08)!important;animation:dc-pulse-p .9s ease-out 1}
+[data-dc-diff="add"]{outline:2px dashed #1677ff!important;background:rgba(22,119,255,.08)!important;animation:dc-pulse-p .9s ease-out 1}
+[data-dc-diff="chg"]{outline:2px solid #1677ff!important;background:rgba(22,119,255,.08)!important;animation:dc-pulse-p .9s ease-out 1}
 [data-dc-diff="attr"]{outline:2px dotted #f0a020!important;background:rgba(240,160,32,.07)!important;animation:dc-pulse-a .9s ease-out 1}
 [data-dc-diff="del"]{outline:2px solid #ff5459!important;background:rgba(255,84,89,.07)!important;animation:dc-pulse-d .9s ease-out 1}
-@keyframes dc-pulse-p{0%{background-color:rgba(176,92,242,.3)}}
+@keyframes dc-pulse-p{0%{background-color:rgba(22,119,255,.3)}}
 @keyframes dc-pulse-a{0%{background-color:rgba(240,160,32,.26)}}
 @keyframes dc-pulse-d{0%{background-color:rgba(255,84,89,.28)}}
 `.trim()

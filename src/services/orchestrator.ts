@@ -108,9 +108,7 @@ async function runGeneration(params: {
   prompt: string
   isNew: boolean
   elementContext: ElementContext | null
-  /** 多方案时传入方案序号（演示配色区分）；缺省按画板版本推算 */
-  demoSeed?: number
-  /** 是否随本次生成写入一条用户消息（多方案时仅首块画板写） */
+  /** 是否随本次生成写入一条用户消息 */
   withUserMessage?: boolean
   /** 指定风格指令（来自 AI 规划卡），优先于风格预设 */
   styleOverride?: string
@@ -119,8 +117,6 @@ async function runGeneration(params: {
   const cv = useCanvasStore()
   const st = useSettingsStore()
   const { board, prompt, isNew, elementContext } = params
-  // 新建时用方案序号区分演示配色；迭代时不传，由 generator 从当前版本推导
-  const demoSeed = params.demoSeed ?? (isNew ? 0 : undefined)
 
   cv.select(board.id)
   if (params.withUserMessage !== false) {
@@ -158,12 +154,11 @@ async function runGeneration(params: {
       elementContext,
       recent,
       sizeHint: `${board.width}×${board.height}`,
-      demoSeed,
       signal: ac.signal,
       onStreamingHtml: (h) => cv.setStreamingHtml(board.id, h),
     })
 
-    const version = await ws.addVersion(board.id, result.html, { demoSeed: result.demoSeed })
+    const version = await ws.addVersion(board.id, result.html)
     const idx = board.versions.findIndex((v) => v.id === version.id)
     const tail =
       result.mode === 'diff' ? '（增量）' : result.mode === 'fallback' ? '（回退全量）' : ''
@@ -358,7 +353,6 @@ export async function sendPrompt(text: string, variantCount = 1) {
         prompt: i === 0 ? trimmed : `${trimmed}\n\n设计方向提示：${directions[i - 1] ?? VARIANT_HINT[i % VARIANT_HINT.length]}`,
         isNew: true,
         elementContext: null,
-        demoSeed: i,
         withUserMessage: i === 0,
       }),
     ),
@@ -500,13 +494,15 @@ export async function runCodeAgent(params: {
     content: params.userText,
     elementContext: params.elementContext ?? null,
   })
-  if (!isAgentProvider(provider)) {
+  if (!provider || !isAgentProvider(provider)) {
     retryAction = () => runCodeAgent(params)
     await ws.addMessage({
       artboardId: boardId,
       role: 'assistant',
       status: 'error',
-      content: '改代码需要本机 Agent：请在「设置 → 模型设置」添加 Claude Code 或 Codex，并在下方模型选择里切换过去，然后重试。',
+      content: !provider
+        ? '还没有配置模型：请到「设置 → 模型设置」配置并选择服务商，然后重试。'
+        : '改代码需要本机 Agent：请在「设置 → 模型设置」添加 Claude Code 或 Codex，并在下方模型选择里切换过去，然后重试。',
     })
     return
   }

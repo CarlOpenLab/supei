@@ -125,6 +125,30 @@ export async function* streamChat(opts: StreamChatOptions): AsyncGenerator<strin
   yield* streamChatBrowser(opts)
 }
 
+/** 拉取 OpenAI 兼容网关的模型列表（GET {baseURL}/models），供设置里选择模型名。
+ *  桌面壳里走 Go 侧代理（本地网关如 Magpie 无 CORS 限制），浏览器里直连。 */
+export async function listModels(baseURL: string, apiKey: string): Promise<string[]> {
+  const { getDesktopBridge } = await import('./desktop')
+  const bridge = await getDesktopBridge()
+  if (bridge) {
+    try {
+      return await bridge.LLM.listModels(baseURL, apiKey)
+    } catch (err) {
+      // 桥接失效时降级为浏览器直连，与 streamChat 的降级策略一致
+      if (!/runtime not found/.test((err as Error).message)) throw err
+    }
+  }
+  const res = await fetch(baseURL.replace(/\/+$/, '') + '/models', {
+    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`模型服务返回 ${res.status}：${text.slice(0, 300) || res.statusText}`)
+  }
+  const json = (await res.json()) as { data?: Array<{ id?: string }> }
+  return (json.data ?? []).map((m) => m.id ?? '').filter(Boolean)
+}
+
 /**
  * @description 桌面壳：经 mygo 绑定调用 Go 侧流式代理；中止时关闭 Channel 让 Go 侧取消 HTTP 请求。
  * @param bridge - 已加载的 mygo 桥接
@@ -164,7 +188,7 @@ async function* streamChatBrowser(opts: StreamChatOptions): AsyncGenerator<strin
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${opts.apiKey}`,
+        ...(opts.apiKey ? { Authorization: `Bearer ${opts.apiKey}` } : {}),
       },
       body: JSON.stringify({
         model: opts.model,

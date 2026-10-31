@@ -120,7 +120,7 @@ const bubbleStyle = computed(() => {
   min-width: 0;
 }
 .target-chip code {
-  background: rgba(176, 92, 242, 0.16);
+  background: rgba(22, 119, 255, 0.16);
   color: var(--accent);
   border: none;
   font-family: var(--mono);
@@ -159,7 +159,7 @@ const bubbleStyle = computed(() => {
 .qchip:hover {
   color: var(--accent);
   background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px rgba(176, 92, 242, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.35);
 }
 .bubble-actions {
   display: flex;

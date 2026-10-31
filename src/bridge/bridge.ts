@@ -8,7 +8,7 @@
  * 4. 实时页面：捕获为静态 HTML（dc:snapshot）、SPA 路由变化上报（dc:location）
  * 宿主 → bridge：dc:set-enabled {value, mode}、dc:apply-all {edits}、dc:clear-selection、dc:snapshot {id}
  * bridge → 宿主：dc:ready、dc:hover、dc:select、dc:inspect {meta, refresh}、dc:text {dcId, text}、dc:wheel、dc:key、
- *               dc:snapshot-result {id, html, title, error}、dc:location {path}
+ *               dc:snapshot-result {id, html, title, error}、dc:location {path}、dc:open-link {href}
  * 注意：本文件是 String.raw 模板，脚本内不能出现反引号与美元符加花括号的组合。
  */
 export const BRIDGE_SCRIPT = String.raw`
@@ -17,7 +17,7 @@ export const BRIDGE_SCRIPT = String.raw`
   window.__dcBridge = true;
 
   var CHANNEL = 'design-canvas';
-  var ACCENT = '#b05cf2';
+  var ACCENT = '#1677ff';
   var RED = '#f24822';
   var MONO = 'ui-monospace,Menlo,Consolas,monospace';
   var INSPECT_PROPS = [
@@ -60,7 +60,7 @@ export const BRIDGE_SCRIPT = String.raw`
     host.setAttribute('data-dc-overlay', '1');
     host.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;z-index:2147483647;';
     root = host.attachShadow({ mode: 'open' });
-    hoverBox = mk(root, 'border:1.5px solid ' + ACCENT + ';background:rgba(176,92,242,0.08);border-radius:2px;');
+    hoverBox = mk(root, 'border:1.5px solid ' + ACCENT + ';background:rgba(22,119,255,0.08);border-radius:2px;');
     hoverLabel = mk(root, 'background:' + ACCENT + ';color:#fff;font:500 10px/18px ' + MONO + ';padding:0 6px;border-radius:3px;white-space:nowrap;max-width:300px;overflow:hidden;text-overflow:ellipsis;');
     selBox = mk(root, 'border:2px solid ' + ACCENT + ';');
     selLabel = mk(root, 'background:' + ACCENT + ';color:#fff;font:600 10px/18px ' + MONO + ';padding:0 6px;border-radius:3px;white-space:nowrap;transform:translateX(-50%);');
@@ -539,6 +539,22 @@ export const BRIDGE_SCRIPT = String.raw`
     if (!pickable(t)) return;
     if (mode === 'edit') selectForEdit(t);
     else send({ type: 'dc:select', meta: metaFor(t) });
+  }, true);
+
+  // 原型里的链接不在画布 iframe 里跳转（防「套娃」）：工具模式由上面的统一点击拦截，
+  // 平时这里把外链交给宿主（桌面端用系统浏览器打开，Web 端开新标签）。
+  // 实时页面的同源链接保留原行为——SPA 路由 / 整页跳转本来就是预览的一部分。
+  document.addEventListener('click', function (e) {
+    if (enabled) return;
+    var t = e.target;
+    if (!(t instanceof Element)) return;
+    var a = t.closest('a[href]');
+    if (!a) return;
+    var href = a.getAttribute('href') || '';
+    if (!href || href.charAt(0) === '#' || /^javascript:/i.test(href)) return;
+    if (location.protocol.indexOf('http') === 0 && a.origin === location.origin) return;
+    e.preventDefault();
+    send({ type: 'dc:open-link', href: a.href });
   }, true);
 
   document.addEventListener('dblclick', function (e) {

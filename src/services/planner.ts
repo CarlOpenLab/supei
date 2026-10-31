@@ -21,34 +21,6 @@ const PLANNER_PROMPT = `你是 v0 式的设计助理。用户会给你一个页�
 
 要求：questions 可以为空数组（需求已足够明确时）；styles 恰好 3 个且方向差异明显。`
 
-/** 演示模式的规划输出（不调网络）。 */
-export const DEMO_PLAN: PlanPayload = {
-  questions: [
-    { id: 'tone', q: '页面的整体气质偏向哪种？', options: ['高级克制', '活泼有亲和力', '先锋实验'] },
-    { id: 'density', q: '信息密度希望如何？', options: ['大量留白', '均衡', '高密度数据感'] },
-  ],
-  styles: [
-    {
-      name: '暖纸工作室',
-      desc: '未涂布纸的暖白底、衬线标题、陶土橙点睛',
-      directive:
-        '【设计风格：暖纸工作室】\n- 底色 #F5F2EB，墨色 #26251F，主色陶土橙 #C4572E 只用于主按钮与下划线。\n- 标题衬线（Georgia + 宋体栈）56/32/18，字距 -0.01em。\n- 8:4 非对称双栏构图，图片占位用同色系深一档纯色块。\n- 圆角 2px，0.5px 墨色细线分隔，不用阴影。\n- 禁止：渐变、emoji 图标、均分三列卡片。',
-    },
-    {
-      name: '墨绿期刊',
-      desc: '深墨绿底、奶白衬线、金铜色细节的编辑部气质',
-      directive:
-        '【设计风格：墨绿期刊】\n- 底色深墨绿 #122B23，文字奶白 #F2EFE6，强调金铜 #C8A96A。\n- 标题衬线斜体混排，行首悬挂序号（01/02）。\n- 12 列网格，图文跨栏错位排布，段间距 48px。\n- 分隔线 1px 金铜 30% 透明，按钮为细描边胶囊。\n- 禁止：纯黑、荧光色、居中对称英雄区。',
-    },
-    {
-      name: '电感微光',
-      desc: '近黑底、电光青数据感、玻璃层次',
-      directive:
-        '【设计风格：电感微光】\n- 底色 #0B0D10，卡片 #14171B + 1px rgba(255,255,255,.07) 描边。\n- 强调电光青 #5CE1E6，仅用于关键数据与激活态。\n- 数字等宽大号（32px+），micro-label 11px 大写字距 0.08em。\n- 背景细网格线 24px 间距，透明度 4%。\n- 禁止：纯白大底、彩色渐变、emoji。',
-    },
-  ],
-}
-
 const ITERATION_PROMPT = `你是设计执行助理。用户会对现有页面原型提出一条修改指令。你的任务是把这条指令拆解为清晰、无歧义的执行项清单，向用户确认理解是否正确。
 
 要求：
@@ -62,14 +34,7 @@ export async function planIteration(
   opts: PlanOptions & { currentHtml: string },
 ): Promise<PlanPayload> {
   const provider = opts.provider
-  if (!provider || provider.id === 'demo') {
-    return {
-      questions: [],
-      styles: [],
-      iteration: true,
-      items: ['理解指令并定位涉及的元素', '执行修改，保持页面其余部分不变'],
-    }
-  }
+  if (!provider) throw new Error('未配置模型：请到「设置 → 模型设置」选择服务商')
   let acc = ''
   for await (const delta of streamCompletion(provider, {
     messages: [
@@ -135,7 +100,7 @@ function sanitizePlan(raw: unknown): PlanPayload {
  */
 export async function planPrototype(opts: PlanOptions): Promise<PlanPayload> {
   const provider = opts.provider
-  if (!provider || provider.id === 'demo') return DEMO_PLAN
+  if (!provider) throw new Error('未配置模型：请到「设置 → 模型设置」选择服务商')
 
   let acc = ''
   for await (const delta of streamCompletion(provider, {

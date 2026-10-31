@@ -128,7 +128,7 @@ const hasDiff = computed(
   filter: brightness(1.2);
   box-shadow:
     inset 0 0 0 1px currentColor,
-    0 0 0 3px rgba(176, 92, 242, 0.12);
+    0 0 0 3px rgba(22, 119, 255, 0.12);
 }
 .filter-hint {
   font-size: 11px;
@@ -172,7 +172,7 @@ const hasDiff = computed(
 .hl-toggle.on {
   color: var(--accent);
   background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px rgba(176, 92, 242, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.35);
 }
 .pane-diff {
   font-family: var(--mono);

@@ -614,7 +614,7 @@ onBeforeUnmount(() => {
 }
 .ic-links .link {
   fill: none;
-  stroke: rgba(176, 92, 242, 0.35);
+  stroke: rgba(22, 119, 255, 0.35);
   stroke-width: 1.5;
   pointer-events: stroke;
   cursor: pointer;
@@ -631,7 +631,7 @@ onBeforeUnmount(() => {
 }
 .guide {
   position: absolute;
-  background: rgba(176, 92, 242, 0.7);
+  background: rgba(22, 119, 255, 0.7);
 }
 .guide-v {
   top: 0;
@@ -646,8 +646,8 @@ onBeforeUnmount(() => {
 .ic-marquee {
   position: absolute;
   z-index: 25;
-  border: 1px solid rgba(176, 92, 242, 0.8);
-  background: rgba(176, 92, 242, 0.08);
+  border: 1px solid rgba(22, 119, 255, 0.8);
+  background: rgba(22, 119, 255, 0.08);
   border-radius: 2px;
   pointer-events: none;
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { Bubble, Sender } from '@antdv-next/x'
-import { Select } from 'antdv-next'
+import { Select, message } from 'antdv-next'
 import { useCanvasStore } from '@/stores/canvas'
 import { useSettingsStore } from '@/stores/settings'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -17,7 +17,6 @@ const settings = useSettingsStore()
 
 const input = ref('')
 const scrollRef = ref<HTMLElement | null>(null)
-const variantCount = ref(1)
 
 const targetBoard = computed(() => ws.findArtboard(canvas.selectedArtboardId))
 
@@ -46,8 +45,12 @@ function fmtTime(ts: number): string {
 function onSubmit(text: string) {
   const t = text.trim()
   if (!t) return
+  if (!settings.active) {
+    message.warning('还没有选择模型：在下方选择，或到「设置 → 模型设置」配置')
+    return
+  }
   input.value = ''
-  sendPrompt(t, variantCount.value)
+  sendPrompt(t, 1)
 }
 
 // 新消息或流式更新时滚到底部
@@ -70,23 +73,14 @@ function fmtSelector(ctx: { tag: string; classes: string[]; text?: string }): st
   return `<${ctx.tag}${cls}>${ctx.text ? ' ' + ctx.text : ''}`
 }
 
-const generatingText = computed(() => {
-  const n = canvas.generating.length
-  if (n > 1) return `正在并行生成 ${n} 个方案…`
-  return '正在生成原型…'
-})
-
-// 是否处于「新建」场景：可选拆分多方案
-const isNewScene = computed(
-  () => !targetBoard.value || (targetBoard.value.kind !== 'live' && targetBoard.value.versions.length === 0),
-)
+const generatingText = computed(() => '正在生成原型…')
 
 // 风格下拉：内置 + 自定义分组
 
-// 模型选择：来自设置里的服务商列表
+// 模型选择：来自设置里的服务商列表；只展示模型名，太长时省略号截断
 const modelOptions = computed(() =>
   settings.providers.map((p) => ({
-    label: p.id === 'demo' ? p.name : `${p.name} · ${p.model}`,
+    label: p.model || p.name,
     value: p.id,
   })),
 )
@@ -172,7 +166,7 @@ const bubbleStyles = {
           v-for="p in PRESETS"
           :key="p.title"
           class="preset"
-          @click="sendPrompt(p.prompt, variantCount)"
+          @click="sendPrompt(p.prompt, 1)"
         >
           <AppIcon :name="p.icon" :size="14" class="preset-icon" />
           <span class="preset-title">{{ p.title }}</span>
@@ -297,31 +291,8 @@ const bubbleStyles = {
         @submit="onSubmit"
         @cancel="stopGeneration"
       >
-        <template #header>
-          <div v-if="isNewScene" class="composer-header">
-            <span class="variant-label">并行方案</span>
-            <button
-              v-for="n in [1, 2, 3]"
-              :key="n"
-              class="count-chip"
-              :class="{ picked: variantCount === n }"
-              @click="variantCount = n"
-            >
-              {{ n }} 个
-            </button>
-            <span class="flex1" />
-          </div>
-        </template>
         <template #footer>
           <div class="composer-footer">
-            <Select
-              :value="settings.activeId"
-              size="small"
-              class="model-select"
-              :options="modelOptions"
-              popup-class-name="composer-dropdown"
-              @change="(v: any) => onModelChange(v)"
-            />
             <button
               class="think-chip"
               :class="{ on: canvas.deepThink }"
@@ -336,6 +307,19 @@ const bubbleStyles = {
           </div>
         </template>
       </Sender>
+      <!-- 模型选择独立成行：不与输入框内控件互相挤压 -->
+      <div class="under-sender">
+        <Select
+          :value="settings.activeId || undefined"
+          size="small"
+          class="model-select"
+          :options="modelOptions"
+          :placeholder="settings.providers.length ? '选择模型' : '点击配置模型'"
+          placement="topLeft"
+          popup-class-name="composer-dropdown"
+          @change="(v: any) => onModelChange(v)"
+        />
+      </div>
     </footer>
   </aside>
 </template>
@@ -377,7 +361,7 @@ const bubbleStyles = {
 }
 .target-chip.active {
   color: var(--accent);
-  border-color: rgba(176, 92, 242, 0.5);
+  border-color: rgba(22, 119, 255, 0.5);
 }
 .chat-scroll {
   flex: 1;
@@ -423,7 +407,7 @@ const bubbleStyles = {
   margin-bottom: 6px;
 }
 .ctx-chip code {
-  background: rgba(176, 92, 242, 0.16);
+  background: rgba(22, 119, 255, 0.16);
   color: var(--accent);
   font-family: var(--mono);
   font-size: 11px;
@@ -565,8 +549,8 @@ const bubbleStyles = {
 }
 .composer:focus-within {
   box-shadow:
-    inset 0 0 0 1px rgba(176, 92, 242, 0.45),
-    0 0 0 4px rgba(176, 92, 242, 0.1),
+    inset 0 0 0 1px rgba(22, 119, 255, 0.45),
+    0 0 0 4px rgba(22, 119, 255, 0.1),
     0 10px 32px rgba(0, 0, 0, 0.45);
 }
 .composer :deep(.antd-sender-content) {
@@ -604,33 +588,6 @@ const bubbleStyles = {
   box-shadow: var(--btn-quiet-shadow) !important;
   color: var(--ink-2) !important;
 }
-.composer-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 10px 2px;
-}
-.count-chip {
-  border: none;
-  background: transparent;
-  box-shadow: var(--btn-quiet-shadow);
-  color: var(--ink-2);
-  font-size: 11.5px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  cursor: pointer;
-  font-family: var(--sans);
-  transition: all var(--dur-fast) var(--ease);
-}
-.count-chip:hover {
-  color: var(--ink);
-  background: var(--bg-raised);
-}
-.count-chip.picked {
-  background: var(--btn-primary-bg);
-  box-shadow: var(--btn-primary-shadow);
-  color: #fff;
-}
 .header-note {
   font-size: 10.5px;
   color: var(--ink-3);
@@ -648,10 +605,15 @@ const bubbleStyles = {
   gap: 6px;
   padding: 4px 6px 6px 8px;
 }
+.under-sender {
+  display: flex;
+  align-items: center;
+  margin-top: 6px;
+}
 .model-select {
-  min-width: 0;
-  flex: 0 1 auto;
-  max-width: 176px;
+  /* 固定宽度：切换模型时选中文案长短不一，自适应宽度会导致整行跳动 */
+  flex: none;
+  width: 240px;
 }
 .model-select :deep(.ant-select-selector) {
   border: none !important;
@@ -667,17 +629,17 @@ const bubbleStyles = {
   background: var(--bg-raised) !important;
   color: var(--ink);
 }
+/* 打开/聚焦时压掉 antd 默认的蓝色光环，避免视觉闪动 */
+.model-select :deep(.ant-select-focused .ant-select-selector),
+.model-select :deep(.ant-select-open .ant-select-selector) {
+  border: none !important;
+  box-shadow: var(--btn-quiet-shadow) !important;
+  background: var(--bg-raised) !important;
+}
 .model-select :deep(.ant-select-arrow) {
   color: var(--ink-3);
   font-size: 10px;
   inset-inline-end: 9px;
-}
-.variant-label {
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  color: var(--ink-3);
-  white-space: nowrap;
 }
 .flex1 {
   flex: 1;
@@ -705,7 +667,7 @@ const bubbleStyles = {
 .think-chip.on {
   color: var(--accent);
   background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px rgba(176, 92, 242, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.35);
 }
 .style-select {
   display: none;

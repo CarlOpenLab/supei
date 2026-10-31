@@ -139,6 +139,24 @@ function onFrameLoad() {
   if (props.edits && Object.keys(props.edits).length) postEdits()
 }
 
+/**
+ * @description 用系统浏览器（桌面端）或新标签（Web）打开外链；iframe 内永远不跳转，
+ * 避免点击原型里的 <a> 把整个网页加载进画板（套娃）。
+ */
+async function openExternal(href: string) {
+  try {
+    const { getDesktopBridge } = await import('@/services/desktop')
+    const bridge = await getDesktopBridge()
+    if (bridge) {
+      await bridge.Sys.openURL(href)
+      return
+    }
+  } catch {
+    /* 桥接不可用时走浏览器兜底 */
+  }
+  window.open(href, '_blank', 'noopener')
+}
+
 function onMessage(ev: MessageEvent) {
   if (ev.source !== iframeRef.value?.contentWindow) return
   const data = ev.data as
@@ -162,6 +180,7 @@ function onMessage(ev: MessageEvent) {
         title?: string
         error?: string
         path?: string
+        href?: string
       }
     | undefined
   if (!data || data.channel !== 'design-canvas') return
@@ -202,6 +221,9 @@ function onMessage(ev: MessageEvent) {
     }
     case 'dc:location':
       if (props.src !== undefined && data.path) emit('location', data.path)
+      break
+    case 'dc:open-link':
+      if (data.href) void openExternal(data.href)
       break
   }
 }
