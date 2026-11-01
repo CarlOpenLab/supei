@@ -575,7 +575,7 @@ const kindOptions = (['style', 'preset', 'template'] as PluginKind[]).map((k) =>
   padding: 11px 14px;
   border-radius: 10px;
   box-shadow: inset 0 0 0 1px var(--line);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--hover);
   font-size: 12px;
   color: var(--ink-2);
   line-height: 1.7;
@@ -592,7 +592,7 @@ const kindOptions = (['style', 'preset', 'template'] as PluginKind[]).map((k) =>
   border: none;
   border-radius: 10px;
   box-shadow: inset 0 0 0 1px var(--line);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--hover);
   padding: 12px 14px;
   display: flex;
   flex-direction: column;

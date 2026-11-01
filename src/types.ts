@@ -83,6 +83,15 @@ export interface PlanPayload {
   info?: boolean
 }
 
+/** 随用户消息发送的参考图 / 资料：图片存压缩后的缩略图，文件只留元信息 */
+export interface ChatAttachment {
+  name: string
+  kind: 'image' | 'file'
+  size: number
+  /** 图片缩略图（data URL），用于会话回看 */
+  preview?: string
+}
+
 export interface ChatMessage {
   id: string
   projectId: string
@@ -95,6 +104,10 @@ export interface ChatMessage {
   status: 'ok' | 'error' | 'aborted'
   /** assistant 消息可携带交互卡（规划：澄清问题 + 风格方案） */
   plan?: PlanPayload | null
+  /** 用户消息附带的参考图 / 资料 */
+  attachments?: ChatAttachment[] | null
+  /** 实际发给模型的完整提示词（含附件正文）；气泡仍只显示 content，供规划卡重生成时复用 */
+  promptText?: string | null
   createdAt: number
 }
 

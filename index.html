@@ -3,8 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
     <title>AI 原型画布</title>
+    <!-- 在样式与脚本加载前先落主题，避免白天模式刷新时闪一帧暗色 -->
+    <script>
+      ;(function () {
+        var mode = 'dark'
+        try {
+          if (localStorage.getItem('dc.theme.v1') === 'light') mode = 'light'
+        } catch (e) {}
+        document.documentElement.setAttribute('data-theme', mode)
+        document.documentElement.style.colorScheme = mode
+      })()
+    </script>
+    <style>
+      html { background: #0a0a0a; }
+      html[data-theme='light'] { background: #e9e9ec; }
+    </style>
     <link rel="preload" href="/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/UncutSans-Variable.ttf" as="font" type="font/ttf" crossorigin />
   </head>

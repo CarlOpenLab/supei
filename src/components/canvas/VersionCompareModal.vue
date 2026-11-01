@@ -213,7 +213,7 @@ const hasDiff = computed(
   font-family: var(--mono);
   font-size: 12px;
   color: var(--ink);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--hover);
   padding: 2px 9px;
   border-radius: 999px;
 }

@@ -15,6 +15,7 @@ import InspectorPanel from '@/components/canvas/InspectorPanel.vue'
 import SettingsModal from '@/components/settings/SettingsModal.vue'
 import ShareModal from '@/components/share/ShareModal.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
+import ThemeToggle from '@/components/ui/ThemeToggle.vue'
 import { pluginRegistry } from '@/plugins/registry'
 import type { TemplatePluginData } from '@/plugins/types'
 import { buildProjectViewerHtml, downloadViewer } from '@/utils/exportProject'
@@ -252,6 +253,7 @@ async function createBoard() {
       <button class="bar-btn icon-only" title="快捷键（按 ?）" @click="helpOpen = true">
         <AppIcon name="help" :size="14" />
       </button>
+      <ThemeToggle />
     </header>
 
     <Modal v-model:open="helpOpen" title="快捷键与操作" width="500px" :footer="null">

@@ -307,7 +307,7 @@ function discard() {
   z-index: 20;
   display: flex;
   flex-direction: column;
-  background: rgba(22, 22, 22, 0.94);
+  background: var(--glass-bg);
   backdrop-filter: blur(12px);
   border-radius: var(--radius-l);
   box-shadow: var(--shadow-float);

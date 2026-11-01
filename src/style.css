@@ -62,6 +62,13 @@
   /* 阴影：深色下用「提亮 + 大投影」而非黑影 */
   --shadow-card: 0 0 0 1px var(--line), 0 12px 32px rgba(0, 0, 0, 0.5);
   --shadow-float: 0 0 0 1px var(--line-strong), 0 24px 64px rgba(0, 0, 0, 0.6);
+  --shadow-popover:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 12px 40px rgba(0, 0, 0, 0.55);
+  --shadow-modal:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 24px 64px rgba(0, 0, 0, 0.6);
+  --shadow-lift: 0 0 0 1px var(--line-strong), 0 18px 44px rgba(0, 0, 0, 0.55);
 
   /* wonder 主按钮配方：顶部高光渐变 + 内发丝环 */
   --btn-primary-bg:
@@ -72,6 +79,47 @@
     inset 0 0 0 1px rgba(255, 255, 255, 0.1);
   --btn-quiet-bg: #1a1a1a;
   --btn-quiet-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+
+  /* 浮层与遮罩 */
+  --float-bg: #1a1a1a;
+  --glass-bg: rgba(26, 26, 26, 0.92);
+  --modal-bg: #161616;
+  --console-bg: rgba(10, 10, 10, 0.94);
+  --mask: rgba(0, 0, 0, 0.6);
+
+  /* 滚动条 / 选区 / 背景辉光 / 标尺刻度 */
+  --scroll-thumb: rgba(255, 255, 255, 0.12);
+  --scroll-thumb-hover: rgba(255, 255, 255, 0.2);
+  --selection-bg: rgba(22, 119, 255, 0.32);
+  --glow-accent: rgba(22, 119, 255, 0.1);
+  --glow-spark: rgba(255, 107, 71, 0.05);
+  --ruler-major: rgba(255, 255, 255, 0.16);
+  --ruler-minor: rgba(255, 255, 255, 0.07);
+
+  /* 输入卡 / 附件托盘 / 拖放与图片预览遮罩 */
+  --composer-shadow: 0 12px 32px rgba(0, 0, 0, 0.38);
+  --composer-shadow-focus:
+    0 0 0 3px rgba(22, 119, 255, 0.08),
+    0 12px 32px rgba(0, 0, 0, 0.38);
+  --tray-border: rgba(255, 255, 255, 0.13);
+  --tray-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025));
+  --tray-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 8px 24px rgba(0, 0, 0, 0.18);
+  --scrim-btn-bg: rgba(8, 8, 8, 0.82);
+  --scrim-btn-bg-hover: rgba(40, 40, 40, 0.95);
+  --scrim-border: rgba(255, 255, 255, 0.12);
+  --preview-scrim: rgba(5, 5, 5, 0.72);
+  --drop-bg: rgba(13, 13, 13, 0.93);
+  --accent-ghost: rgba(22, 119, 255, 0.05);
+
+  /* 危险色 */
+  --danger: #ff5459;
+  --danger-soft: rgba(255, 84, 89, 0.14);
+  --danger-soft-strong: rgba(255, 84, 89, 0.22);
+  --danger-ring: rgba(255, 84, 89, 0.28);
+
+  color-scheme: dark;
 
   --sans: 'Inter', -apple-system, 'SF Pro Text', 'PingFang SC', 'Microsoft YaHei',
     'Segoe UI', sans-serif;
@@ -87,6 +135,88 @@
   --dur: 180ms;
   --dur-slow: 280ms;
   --ease: cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+/* ============================================================
+   白天模式：纸面分层（浅灰外壳 → 白色内容），强调色与暗色一致。
+   只覆盖语义变量，组件样式无需感知主题。
+   ============================================================ */
+:root[data-theme='light'] {
+  --bg-root: #e9e9ec;        /* 最深：应用底 / 窗口边缘 */
+  --bg-canvas: #f3f3f5;      /* 画布区 */
+  --bg-panel: #fbfbfc;       /* 侧栏 / 顶栏 */
+  --bg-elevated: #ffffff;    /* 卡片 / 输入卡 / 弹层 */
+  --bg-raised: #f0f0f2;      /* 更高一层：hover 卡 / chip 底 */
+
+  --hover: rgba(17, 17, 20, 0.05);
+  --active: rgba(17, 17, 20, 0.08);
+
+  --line: rgba(17, 17, 20, 0.08);
+  --line-strong: rgba(17, 17, 20, 0.14);
+  --hairline-inset: inset 0 0 0 1px rgba(17, 17, 20, 0.08);
+
+  --ink: rgba(17, 17, 20, 0.92);
+  --ink-2: rgba(17, 17, 20, 0.62);
+  --ink-3: rgba(17, 17, 20, 0.4);
+
+  --accent-soft: rgba(22, 119, 255, 0.1);
+
+  --canvas-dot: rgba(17, 17, 20, 0.09);
+
+  --shadow-card: 0 0 0 1px var(--line), 0 12px 32px rgba(17, 17, 20, 0.08);
+  --shadow-float: 0 0 0 1px var(--line-strong), 0 24px 64px rgba(17, 17, 20, 0.16);
+  --shadow-popover: inset 0 0 0 1px var(--line), 0 12px 40px rgba(17, 17, 20, 0.14);
+  --shadow-modal: inset 0 0 0 1px var(--line), 0 24px 64px rgba(17, 17, 20, 0.18);
+  --shadow-lift: 0 0 0 1px var(--line-strong), 0 18px 44px rgba(17, 17, 20, 0.14);
+
+  --btn-primary-bg:
+    linear-gradient(rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.1) 49%, rgba(0, 0, 0, 0) 51%),
+    var(--accent);
+  --btn-primary-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 0 0 1px rgba(9, 88, 217, 0.35),
+    0 1px 2px rgba(9, 88, 217, 0.25);
+  --btn-quiet-bg: #ffffff;
+  --btn-quiet-shadow:
+    inset 0 0 0 1px rgba(17, 17, 20, 0.1),
+    0 1px 2px rgba(17, 17, 20, 0.04);
+
+  --float-bg: #ffffff;
+  --glass-bg: rgba(255, 255, 255, 0.9);
+  --modal-bg: #ffffff;
+  --console-bg: rgba(250, 250, 251, 0.96);
+  --mask: rgba(17, 17, 20, 0.32);
+
+  --scroll-thumb: rgba(17, 17, 20, 0.18);
+  --scroll-thumb-hover: rgba(17, 17, 20, 0.3);
+  --selection-bg: rgba(22, 119, 255, 0.22);
+  --glow-accent: rgba(22, 119, 255, 0.07);
+  --glow-spark: rgba(255, 107, 71, 0.06);
+  --ruler-major: rgba(17, 17, 20, 0.16);
+  --ruler-minor: rgba(17, 17, 20, 0.07);
+
+  --composer-shadow: 0 8px 24px rgba(17, 17, 20, 0.08);
+  --composer-shadow-focus:
+    0 0 0 3px rgba(22, 119, 255, 0.1),
+    0 8px 24px rgba(17, 17, 20, 0.1);
+  --tray-border: rgba(17, 17, 20, 0.1);
+  --tray-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.6));
+  --tray-shadow:
+    inset 0 1px 0 #ffffff,
+    0 8px 24px rgba(17, 17, 20, 0.06);
+  --scrim-btn-bg: rgba(255, 255, 255, 0.88);
+  --scrim-btn-bg-hover: #ffffff;
+  --scrim-border: rgba(17, 17, 20, 0.12);
+  --preview-scrim: rgba(233, 233, 236, 0.82);
+  --drop-bg: rgba(250, 250, 251, 0.94);
+  --accent-ghost: rgba(22, 119, 255, 0.06);
+
+  --danger: #d92d20;
+  --danger-soft: rgba(217, 45, 32, 0.08);
+  --danger-soft-strong: rgba(217, 45, 32, 0.14);
+  --danger-ring: rgba(217, 45, 32, 0.24);
+
+  color-scheme: light;
 }
 
 @keyframes enter {
@@ -160,27 +290,26 @@ body {
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--scroll-thumb);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--scroll-thumb-hover);
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 
 ::selection {
-  background: rgba(22, 119, 255, 0.32);
+  background: var(--selection-bg);
 }
 
 /* —— 浮层质感：发丝环 + 深投影（Modal / Popover / 下拉） —— */
+.ant-modal .ant-modal-container,
 .ant-modal .ant-modal-content {
-  background: #161616;
+  background: var(--modal-bg);
   border-radius: 12px;
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
-    0 24px 64px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-modal);
   /* 超高内容不再撑破视口：内容区 75vh 封顶，body 内置滚动 */
   display: flex;
   flex-direction: column;
@@ -193,33 +322,29 @@ body {
   overflow-y: auto;
 }
 .ant-modal-mask {
-  background: rgba(0, 0, 0, 0.6) !important;
+  background: var(--mask) !important;
 }
 .ant-popover .ant-popover-inner,
 .ant-popconfirm .ant-popover-inner {
-  background: #1a1a1a;
+  background: var(--float-bg);
   border-radius: 10px;
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
-    0 12px 40px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--shadow-popover);
 }
 .ant-select-dropdown,
 .ant-dropdown {
-  background: #1a1a1a !important;
+  background: var(--float-bg) !important;
   border-radius: 10px !important;
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
-    0 12px 40px rgba(0, 0, 0, 0.55) !important;
+  box-shadow: var(--shadow-popover) !important;
 }
 .ant-select-item {
   border-radius: 6px !important;
 }
 .ant-select-item-option-active,
 .ant-select-item-option-hovered {
-  background: rgba(255, 255, 255, 0.06) !important;
+  background: var(--hover) !important;
 }
 .ant-select-item-option-selected {
-  background: rgba(22, 119, 255, 0.14) !important;
+  background: var(--accent-soft) !important;
   color: var(--accent);
 }
 
