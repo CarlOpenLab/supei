@@ -788,11 +788,10 @@ onBeforeUnmount(() => {
   gap: 2px;
   padding: 4px 5px;
   border-radius: 10px;
-  background: rgba(22, 22, 22, 0.88);
+  /* 主题感知的玻璃底：暗色近黑、白天近白，随 data-theme 切换 */
+  background: var(--glass-bg);
   backdrop-filter: blur(10px);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
-    0 10px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-popover);
   z-index: 30;
 }
 .ic-tools .tool {
