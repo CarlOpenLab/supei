@@ -658,6 +658,17 @@ const bubbleStyles = {
             >
               <AppIcon name="plus" :size="17" />
             </button>
+            <button
+              type="button"
+              class="think-pill"
+              :class="{ on: canvas.deepThink }"
+              :aria-pressed="canvas.deepThink"
+              title="深度思考：透传 reasoning_effort=high，仅部分模型支持"
+              @click="canvas.toggleDeepThink()"
+            >
+              <AppIcon name="sparkle" :size="11" />
+              <span>思考</span>
+            </button>
             <span class="tools-spacer" />
             <button
               type="button"
@@ -673,7 +684,7 @@ const bubbleStyles = {
             </button>
           </div>
         </div>
-        <!-- 模型与思考：收在 sender 卡片下方 -->
+        <!-- 模型选择：收在 sender 卡片下方 -->
         <div class="composer-under">
           <div class="model-slot">
             <Select
@@ -688,17 +699,6 @@ const bubbleStyles = {
               @change="(v: any) => onModelChange(v)"
             />
           </div>
-          <button
-            type="button"
-            class="think-pill"
-            :class="{ on: canvas.deepThink }"
-            :aria-pressed="canvas.deepThink"
-            title="深度思考：透传 reasoning_effort=high，仅部分模型支持"
-            @click="canvas.toggleDeepThink()"
-          >
-            <AppIcon name="sparkle" :size="12" />
-            <span>思考</span>
-          </button>
         </div>
         <div v-if="dragging" class="drop-overlay" aria-hidden="true">
           <AppIcon name="image" :size="18" />
@@ -1419,7 +1419,7 @@ const bubbleStyles = {
   flex: 1;
   min-width: 4px;
 }
-/* —— sender 下方：模型选择 + 深度思考 —— */
+/* —— sender 下方：模型选择 —— */
 .composer-under {
   display: flex;
   align-items: center;
@@ -1487,15 +1487,14 @@ const bubbleStyles = {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 30px;
-  padding: 0 10px;
+  height: 28px;
+  padding: 0 9px;
   border: none;
   border-radius: 999px;
   background: transparent;
-  box-shadow: var(--btn-quiet-shadow);
   color: var(--ink-2);
   font-family: var(--sans);
-  font-size: 11.5px;
+  font-size: 11px;
   white-space: nowrap;
   cursor: pointer;
   transition:
