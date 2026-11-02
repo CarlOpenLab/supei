@@ -4,7 +4,6 @@ import { useRouter } from 'vue-router'
 import { Input, Modal, Popconfirm, message } from 'antdv-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 import AppIcon from '@/components/ui/AppIcon.vue'
-import ThemeToggle from '@/components/ui/ThemeToggle.vue'
 
 const router = useRouter()
 const ws = useWorkspaceStore()
@@ -47,21 +46,6 @@ function fmtDate(ts: number): string {
 
 <template>
   <div class="home">
-    <!-- 设计工具隐喻：顶部标尺刻度 -->
-    <div class="ruler-x" aria-hidden="true" />
-
-    <header class="topbar">
-      <span class="win-lights" aria-hidden="true"><i /><i /><i /></span>
-      <span class="logo-mark" aria-hidden="true">
-        <svg viewBox="0 0 16 16" width="11" height="11" fill="#fff">
-          <path d="M8 0l1.7 4.6L14 3l-3 3.7L16 8l-5 1.3L14 13l-4.3-1.6L8 16l-1.7-4.6L2 13l3-3.7L0 8l5-1.3L2 3l4.3 1.6z" />
-        </svg>
-      </span>
-      <span class="wordmark">原型画布</span>
-      <span class="topbar-meta">Design Canvas · v0.1</span>
-      <ThemeToggle />
-    </header>
-
     <main v-if="ready" class="content">
       <section class="hero">
         <div class="hero-left">
@@ -148,69 +132,6 @@ function fmtDate(ts: number): string {
     radial-gradient(900px 420px at 50% -8%, var(--glow-accent), transparent 62%),
     radial-gradient(700px 360px at 88% 4%, var(--glow-spark), transparent 60%),
     var(--bg-canvas);
-}
-
-/* 顶部标尺：8px 小刻度 + 80px 大刻度，设计工具隐喻 */
-.ruler-x {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 26px;
-  z-index: 20;
-  background:
-    repeating-linear-gradient(90deg, var(--ruler-major) 0 1px, transparent 1px 80px) left bottom / 100% 9px no-repeat,
-    repeating-linear-gradient(90deg, var(--ruler-minor) 0 1px, transparent 1px 8px) left bottom / 100% 5px no-repeat,
-    var(--bg-panel);
-  border-bottom: 1px solid var(--line);
-}
-
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 26px;
-  padding: 13px 24px;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-panel);
-}
-.win-lights {
-  display: inline-flex;
-  gap: 6px;
-  margin-right: 4px;
-}
-.win-lights i {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  opacity: 0.55;
-}
-.win-lights i:nth-child(1) { background: #ff5f57; }
-.win-lights i:nth-child(2) { background: #febc2e; }
-.win-lights i:nth-child(3) { background: #28c840; }
-.logo-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  background: linear-gradient(135deg, var(--accent) 10%, var(--spark) 110%);
-  box-shadow: var(--btn-primary-shadow);
-}
-.wordmark {
-  font-family: var(--display);
-  font-size: 14.5px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--ink);
-}
-.topbar-meta {
-  margin-left: auto;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--ink-3);
-  letter-spacing: 0.08em;
 }
 
 .content {

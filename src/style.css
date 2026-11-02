@@ -93,8 +93,6 @@
   --selection-bg: rgba(22, 119, 255, 0.32);
   --glow-accent: rgba(22, 119, 255, 0.1);
   --glow-spark: rgba(255, 107, 71, 0.05);
-  --ruler-major: rgba(255, 255, 255, 0.16);
-  --ruler-minor: rgba(255, 255, 255, 0.07);
 
   /* 输入卡 / 附件托盘 / 拖放与图片预览遮罩 */
   --composer-shadow: 0 12px 32px rgba(0, 0, 0, 0.38);
@@ -192,8 +190,6 @@
   --selection-bg: rgba(22, 119, 255, 0.22);
   --glow-accent: rgba(22, 119, 255, 0.07);
   --glow-spark: rgba(255, 107, 71, 0.06);
-  --ruler-major: rgba(17, 17, 20, 0.16);
-  --ruler-minor: rgba(17, 17, 20, 0.07);
 
   --composer-shadow: 0 8px 24px rgba(17, 17, 20, 0.08);
   --composer-shadow-focus:
