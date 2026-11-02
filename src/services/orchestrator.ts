@@ -1,7 +1,7 @@
 import { useCanvasStore } from '@/stores/canvas'
 import { useSettingsStore } from '@/stores/settings'
 import { useWorkspaceStore, type NewArtboardInput } from '@/stores/workspace'
-import type { Artboard, ElementContext, PlanPayload, PlanStyle, Version } from '@/types'
+import type { Artboard, ChatAttachment, ElementContext, PlanPayload, PlanStyle, Version } from '@/types'
 import { applyEdits } from '@/utils/editable'
 import { describeChanges } from '@/utils/diff'
 import { describeElement, generatePrototype } from './generator'
@@ -112,6 +112,10 @@ async function runGeneration(params: {
   withUserMessage?: boolean
   /** 指定风格指令（来自 AI 规划卡），优先于风格预设 */
   styleOverride?: string
+  /** 写入对话流的展示文案（不含附件正文）；缺省用 prompt */
+  displayPrompt?: string
+  /** 随用户消息展示的参考图 / 资料 */
+  attachments?: ChatAttachment[]
 }) {
   const ws = useWorkspaceStore()
   const cv = useCanvasStore()
@@ -123,8 +127,10 @@ async function runGeneration(params: {
     await ws.addMessage({
       artboardId: board.id,
       role: 'user',
-      content: prompt,
+      content: params.displayPrompt ?? prompt,
       elementContext,
+      attachments: params.attachments,
+      promptText: prompt,
     })
   }
 
@@ -174,7 +180,16 @@ async function runGeneration(params: {
     if (!aborted) {
       retryAction = async () => {
         const b = ws.findArtboard(board.id)
-        if (b) await runGeneration({ board: b, prompt, isNew, elementContext })
+        if (b) {
+          await runGeneration({
+            board: b,
+            prompt,
+            isNew,
+            elementContext,
+            displayPrompt: params.displayPrompt,
+            attachments: params.attachments,
+          })
+        }
       }
     }
     await ws.addMessage({
@@ -190,22 +205,31 @@ async function runGeneration(params: {
   }
 }
 
+export interface SendPromptOptions {
+  /** 写进对话流的展示文案；附件正文只进入生成提示词，不污染气泡 */
+  displayText?: string
+  /** 随用户消息展示的参考图 / 资料 */
+  attachments?: ChatAttachment[]
+}
+
 /**
  * 聊天面板发送指令：
  * - variantCount = 1：选中空画板 → 首个版本；选中已有版本 → 迭代；无选中 → 新建画板
  * - variantCount > 1：忽略已有版本的画板，并排出 N 个方案（选中的空画板作为方案 A）
  */
-export async function sendPrompt(text: string, variantCount = 1) {
+export async function sendPrompt(text: string, variantCount = 1, options: SendPromptOptions = {}) {
   const ws = useWorkspaceStore()
   const cv = useCanvasStore()
   const st = useSettingsStore()
   const trimmed = text.trim()
   if (!trimmed || cv.busy) return
+  const displayText = options.displayText?.trim() || trimmed
+  const attachments = options.attachments
 
   // 实时画板：对话直接交给本机 Agent 改仓库代码（网页实时画板没有源码，先捕获为设计稿）
   const selectedBoard = ws.findArtboard(cv.selectedArtboardId)
   if (selectedBoard?.kind === 'live') {
-    await sendLiveFeedback(selectedBoard, null, trimmed)
+    await sendLiveFeedback(selectedBoard, null, trimmed, { displayText, attachments })
     return
   }
 
@@ -218,7 +242,13 @@ export async function sendPrompt(text: string, variantCount = 1) {
         const b: Artboard = board
         cv.select(b.id)
         await commitManualEdits(b.id)
-        await ws.addMessage({ artboardId: b.id, role: 'user', content: trimmed })
+        await ws.addMessage({
+          artboardId: b.id,
+          role: 'user',
+          content: displayText,
+          attachments,
+          promptText: trimmed,
+        })
         cv.startGenerating(b.id)
         const ac = new AbortController()
         activeControllers.add(ac)
@@ -246,20 +276,40 @@ export async function sendPrompt(text: string, variantCount = 1) {
             return
           }
           console.warn('[plan-iteration] 确认失败，直接生成', err)
-          await runGeneration({ board, prompt: trimmed, isNew: false, elementContext: null })
+          await runGeneration({
+            board,
+            prompt: trimmed,
+            isNew: false,
+            elementContext: null,
+            displayPrompt: displayText,
+            attachments,
+          })
         } finally {
           activeControllers.delete(ac)
         }
         return
       }
-      await runGeneration({ board, prompt: trimmed, isNew: false, elementContext: null })
+      await runGeneration({
+        board,
+        prompt: trimmed,
+        isNew: false,
+        elementContext: null,
+        displayPrompt: displayText,
+        attachments,
+      })
       return
     }
     if (!board) {
-      board = await createEmptyArtboard({ title: trimmed.slice(0, 16) })
+      board = await createEmptyArtboard({ title: displayText.slice(0, 16) })
     }
     cv.select(board.id)
-    await ws.addMessage({ artboardId: board.id, role: 'user', content: trimmed })
+    await ws.addMessage({
+      artboardId: board.id,
+      role: 'user',
+      content: displayText,
+      attachments,
+      promptText: trimmed,
+    })
 
     // —— v0 式规划：AI 先在对话流里提问 + 给风格方向，用户点选后才生成 ——
     cv.startGenerating(board.id)
@@ -291,7 +341,14 @@ export async function sendPrompt(text: string, variantCount = 1) {
       }
       // 规划失败：回退为直接生成，不让用户卡在流程里
       console.warn('[plan] 规划失败，回退直接生成', err)
-      await runGeneration({ board, prompt: trimmed, isNew: true, elementContext: null })
+      await runGeneration({
+        board,
+        prompt: trimmed,
+        isNew: true,
+        elementContext: null,
+        displayPrompt: displayText,
+        attachments,
+      })
     } finally {
       activeControllers.delete(ac)
       cv.stopGenerating(board.id)
@@ -302,7 +359,7 @@ export async function sendPrompt(text: string, variantCount = 1) {
   // —— 多方案并行 ——
   const n = Math.min(3, variantCount)
   const selected = ws.findArtboard(cv.selectedArtboardId)
-  const baseTitle = trimmed.slice(0, 12)
+  const baseTitle = displayText.slice(0, 12)
   const first =
     selected && selected.versions.length === 0
       ? selected
@@ -354,6 +411,8 @@ export async function sendPrompt(text: string, variantCount = 1) {
         isNew: true,
         elementContext: null,
         withUserMessage: i === 0,
+        displayPrompt: i === 0 ? displayText : undefined,
+        attachments: i === 0 ? attachments : undefined,
       }),
     ),
   )
@@ -375,6 +434,10 @@ export async function startFromPlan(params: {
   answers?: Record<string, string>
   style?: PlanStyle | null
   items?: string[]
+  /** 对话流展示文案（不含附件正文）；缺省显示完整提示词 */
+  displayPrompt?: string
+  /** 随用户消息展示的参考图 / 资料 */
+  attachments?: ChatAttachment[]
 }) {
   const cv = useCanvasStore()
   const ws = useWorkspaceStore()
@@ -401,6 +464,8 @@ export async function startFromPlan(params: {
     isNew: true,
     elementContext: null,
     styleOverride: params.style?.directive,
+    displayPrompt: params.displayPrompt,
+    attachments: params.attachments,
   })
 }
 
@@ -475,6 +540,7 @@ function relativeTo(repoDir: string): (text: string) => string {
  * @param params.userText - 显示在对话流里的用户原话
  * @param params.prompt - 实际发给 Agent 的完整指令
  * @param params.elementContext - 用户点选的元素（可选）
+ * @param params.attachments - 随用户消息展示的参考图 / 资料（可选）
  */
 export async function runCodeAgent(params: {
   boardId: string
@@ -482,6 +548,7 @@ export async function runCodeAgent(params: {
   userText: string
   prompt: string
   elementContext?: ElementContext | null
+  attachments?: ChatAttachment[]
 }): Promise<void> {
   const ws = useWorkspaceStore()
   const cv = useCanvasStore()
@@ -493,6 +560,8 @@ export async function runCodeAgent(params: {
     role: 'user',
     content: params.userText,
     elementContext: params.elementContext ?? null,
+    attachments: params.attachments,
+    promptText: params.prompt,
   })
   if (!provider || !isAgentProvider(provider)) {
     retryAction = () => runCodeAgent(params)
@@ -572,13 +641,27 @@ export async function runCodeAgent(params: {
  * @param board - 实时画板
  * @param ctx - 点选的元素；对话直接描述时为 null
  * @param text - 修改要求
+ * @param options - 对话流展示文案与随消息附带的参考图 / 资料
  */
-export async function sendLiveFeedback(board: Artboard, ctx: ElementContext | null, text: string): Promise<void> {
+export async function sendLiveFeedback(
+  board: Artboard,
+  ctx: ElementContext | null,
+  text: string,
+  options: SendPromptOptions = {},
+): Promise<void> {
   const live = board.live
   if (!live) return
+  const displayText = options.displayText?.trim() || text
   if (live.type !== 'repo' || !live.repoDir) {
     const ws = useWorkspaceStore()
-    await ws.addMessage({ artboardId: board.id, role: 'user', content: text, elementContext: ctx })
+    await ws.addMessage({
+      artboardId: board.id,
+      role: 'user',
+      content: displayText,
+      elementContext: ctx,
+      attachments: options.attachments,
+      promptText: text,
+    })
     await ws.addMessage({
       artboardId: board.id,
       role: 'assistant',
@@ -589,7 +672,14 @@ export async function sendLiveFeedback(board: Artboard, ctx: ElementContext | nu
   const parts = [`【页面路由】${live.route}`]
   if (ctx) parts.push('', '【用户在实时页面上选中的元素】', describeElement(ctx))
   parts.push('', '【修改要求】', text, '', ctx ? '请在源码中找到渲染该元素的组件，按要求修改。' : '请按要求修改这个页面的源码。')
-  await runCodeAgent({ boardId: board.id, repoDir: live.repoDir, userText: text, prompt: parts.join('\n'), elementContext: ctx })
+  await runCodeAgent({
+    boardId: board.id,
+    repoDir: live.repoDir,
+    userText: displayText,
+    prompt: parts.join('\n'),
+    elementContext: ctx,
+    attachments: options.attachments,
+  })
 }
 
 /**

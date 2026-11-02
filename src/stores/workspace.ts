@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { Artboard, CaptureSource, ChatMessage, ChatRole, ElementContext, LiveSource, PlanPayload, Project, Version } from '@/types'
+import type { Artboard, CaptureSource, ChatAttachment, ChatMessage, ChatRole, ElementContext, LiveSource, PlanPayload, Project, Version } from '@/types'
 import * as db from '@/services/db'
 import { uid } from '@/utils/id'
 
@@ -189,6 +189,8 @@ export const useWorkspaceStore = defineStore('workspace', {
       versionId?: string | null
       status?: 'ok' | 'error' | 'aborted'
       plan?: PlanPayload | null
+      attachments?: ChatAttachment[] | null
+      promptText?: string | null
     }): Promise<ChatMessage> {
       const msg: ChatMessage = {
         id: uid('msg'),
@@ -200,6 +202,8 @@ export const useWorkspaceStore = defineStore('workspace', {
         versionId: input.versionId ?? null,
         status: input.status ?? 'ok',
         plan: input.plan ?? null,
+        attachments: input.attachments ?? null,
+        promptText: input.promptText ?? null,
         createdAt: Date.now(),
       }
       this.messages.push(msg)

@@ -100,13 +100,11 @@ const bubbleStyle = computed(() => {
 .comment-bubble {
   position: absolute;
   width: 300px;
-  background: rgba(22, 22, 22, 0.92);
+  background: var(--glass-bg);
   backdrop-filter: blur(10px);
   border-radius: 12px;
   border: none;
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.09),
-    0 16px 48px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--shadow-popover);
   padding: 10px;
   z-index: 30;
   display: flex;

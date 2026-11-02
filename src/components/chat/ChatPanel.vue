@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
-import { Bubble, Sender } from '@antdv-next/x'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { Bubble } from '@antdv-next/x'
 import { Select, message } from 'antdv-next'
 import { useCanvasStore } from '@/stores/canvas'
 import { useSettingsStore } from '@/stores/settings'
@@ -8,7 +8,7 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { replan, retryLast, sendPrompt, startFromPlan, stopGeneration } from '@/services/orchestrator'
 import { pluginRegistry } from '@/plugins/registry'
 import type { PresetPluginData } from '@/plugins/types'
-import type { ChatMessage, PlanStyle } from '@/types'
+import type { ChatAttachment, ChatMessage, PlanStyle } from '@/types'
 import AppIcon from '@/components/ui/AppIcon.vue'
 
 const canvas = useCanvasStore()
@@ -18,19 +18,71 @@ const settings = useSettingsStore()
 const input = ref('')
 const scrollRef = ref<HTMLElement | null>(null)
 
+/** 输入框里待发送的参考图 / 资料 */
+interface ComposerAttachment {
+  id: number
+  file: File
+  /** 图片缩略图（data URL）；非图片或读取失败时为空 */
+  preview?: string
+  /** 文本类文件的内容，发送时并入提示词 */
+  text?: string
+}
+
+const MAX_ATTACHMENTS = 6
+const FILE_ACCEPT =
+  'image/*,.pdf,.md,.markdown,.txt,.csv,.json,.html,.htm,.css,.js,.ts,.vue,.tsx,.jsx,.yml,.yaml'
+const TEXT_EXTENSIONS = new Set([
+  'md', 'markdown', 'txt', 'csv', 'json', 'html', 'htm', 'css', 'js', 'ts', 'vue', 'tsx', 'jsx', 'yml', 'yaml',
+])
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg|avif)$/i
+
+const fileInput = ref<HTMLInputElement | null>(null)
+const textareaRef = ref<HTMLTextAreaElement | null>(null)
+const previewCloseRef = ref<HTMLButtonElement | null>(null)
+const attachments = ref<ComposerAttachment[]>([])
+/** 正在预览的图片附件（Studio composer 式点击查看） */
+const previewing = ref<ComposerAttachment | null>(null)
+const dragging = ref(false)
+let attachmentSeq = 0
+let dragDepth = 0
+
+/** 输入框最大高度（约 6 行），超出后内部滚动 */
+const MAX_INPUT_HEIGHT = 144
+
 const targetBoard = computed(() => ws.findArtboard(canvas.selectedArtboardId))
 
 const placeholder = computed(() => {
   const b = targetBoard.value
-  if (!b) return '描述你想要的页面，AI 将创建画板并生成原型'
+  if (!b) return '描述你想要的页面…'
   if (b.kind === 'live') {
-    return b.live?.type === 'repo'
-      ? `描述要改的地方，本机 Agent 会直接修改「${b.title}」的代码`
-      : '网页实时画板没有源码：先在头栏「捕获」为设计稿再迭代'
+    return b.live?.type === 'repo' ? '描述要改的地方…' : '先捕获为设计稿…'
   }
-  return b.versions.length
-    ? `向「${b.title}」描述改动，Enter 发送`
-    : `将在「${b.title}」上生成原型，描述你想要的页面`
+  // 胶囊输入区较窄，不放画板标题，避免 placeholder 被截断
+  return b.versions.length ? '描述要改的地方…' : '描述你想生成的页面…'
+})
+
+const canSend = computed(() => input.value.trim().length > 0 && !canvas.busy)
+
+/** 先置 auto 取内容实际高度，再封顶 */
+function autosize() {
+  const el = textareaRef.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${Math.min(el.scrollHeight, MAX_INPUT_HEIGHT)}px`
+}
+
+onMounted(() => {
+  autosize()
+  window.addEventListener('keydown', onPreviewKeydown)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onPreviewKeydown)
+})
+watch(input, () => nextTick(autosize))
+
+watch(previewing, (item) => {
+  if (item) nextTick(() => previewCloseRef.value?.focus())
+  else nextTick(() => textareaRef.value?.focus())
 })
 
 const PRESETS = pluginRegistry
@@ -42,6 +94,173 @@ function fmtTime(ts: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+function fileExt(name: string): string {
+  const i = name.lastIndexOf('.')
+  return i > 0 ? name.slice(i + 1).toLowerCase() : ''
+}
+
+function extLabel(name: string): string {
+  return (fileExt(name) || 'file').slice(0, 4).toUpperCase()
+}
+
+function isImageFile(file: File): boolean {
+  return file.type.startsWith('image/') || IMAGE_EXT_RE.test(file.name)
+}
+
+function attachmentKey(file: File): string {
+  return `${file.name}:${file.size}:${file.lastModified}`
+}
+
+function fmtSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+/** 图片压成小缩略图再入会话，避免把原图塞进 IndexedDB */
+async function makePreview(file: File): Promise<string | undefined> {
+  if (!isImageFile(file)) return
+  try {
+    const bitmap = await createImageBitmap(file)
+    const scale = Math.min(1, 256 / Math.max(bitmap.width, bitmap.height, 1))
+    const canvasEl = document.createElement('canvas')
+    canvasEl.width = Math.max(1, Math.round(bitmap.width * scale))
+    canvasEl.height = Math.max(1, Math.round(bitmap.height * scale))
+    const ctx = canvasEl.getContext('2d')
+    if (!ctx) {
+      bitmap.close()
+      return
+    }
+    ctx.drawImage(bitmap, 0, 0, canvasEl.width, canvasEl.height)
+    bitmap.close()
+    return canvasEl.toDataURL('image/jpeg', 0.72)
+  } catch {
+    return
+  }
+}
+
+/** 文本类资料作为生成上下文；PDF / 图片等二进制文件只作展示 */
+async function readAttachmentText(file: File): Promise<string | undefined> {
+  if (!TEXT_EXTENSIONS.has(fileExt(file.name)) || file.size > 400_000) return
+  try {
+    const raw = await file.text()
+    if (!raw.trim()) return
+    return raw.length > 16_000 ? `${raw.slice(0, 16_000)}\n…（内容已截断）` : raw
+  } catch {
+    return
+  }
+}
+
+/** 把附件正文拼进提示词；图片只列文件名，避免假装模型已读图 */
+function composePrompt(text: string, items: ComposerAttachment[]): string {
+  const blocks: string[] = []
+  const images = items.filter((item) => isImageFile(item.file)).map((item) => item.file.name)
+  if (images.length) blocks.push(`【参考图片】${images.join('、')}`)
+  let budget = 40_000
+  for (const item of items) {
+    if (!item.text || budget <= 0) continue
+    const chunk = item.text.slice(0, budget)
+    budget -= chunk.length
+    blocks.push(`【附件：${item.file.name}】\n${chunk}${chunk.length < item.text.length ? '\n…（内容已截断）' : ''}`)
+  }
+  return blocks.length ? `${text}\n\n${blocks.join('\n\n')}` : text
+}
+
+async function addFiles(list: File[]) {
+  if (!list.length) return
+  const room = MAX_ATTACHMENTS - attachments.value.length
+  if (room <= 0) {
+    message.warning(`最多添加 ${MAX_ATTACHMENTS} 个附件`)
+    return
+  }
+  if (list.length > room) message.warning(`最多添加 ${MAX_ATTACHMENTS} 个附件，已忽略多余文件`)
+  const existing = new Set(attachments.value.map((item) => attachmentKey(item.file)))
+  const accepted: File[] = []
+  for (const file of list.slice(0, room)) {
+    const key = attachmentKey(file)
+    if (existing.has(key)) continue
+    existing.add(key)
+    accepted.push(file)
+  }
+  if (!accepted.length) return
+  const items = await Promise.all(
+    accepted.map(async (file) => ({
+      id: ++attachmentSeq,
+      file,
+      preview: await makePreview(file),
+      text: await readAttachmentText(file),
+    })),
+  )
+  attachments.value.push(...items)
+  nextTick(() => textareaRef.value?.focus())
+}
+
+function pickFiles() {
+  if (attachments.value.length >= MAX_ATTACHMENTS) {
+    message.warning(`最多添加 ${MAX_ATTACHMENTS} 个附件`)
+    return
+  }
+  fileInput.value?.click()
+}
+
+function onFilePick(event: Event) {
+  const el = event.target as HTMLInputElement
+  void addFiles(Array.from(el.files ?? []))
+  el.value = ''
+}
+
+function removeAttachment(id: number) {
+  attachments.value = attachments.value.filter((item) => item.id !== id)
+  if (previewing.value?.id === id) previewing.value = null
+}
+
+function clearAttachments() {
+  attachments.value = []
+  previewing.value = null
+}
+
+function openPreview(item: ComposerAttachment) {
+  if (!item.preview) return
+  previewing.value = item
+}
+
+function closePreview() {
+  previewing.value = null
+}
+
+function onPreviewKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') closePreview()
+}
+
+function hasDraggedFiles(event: DragEvent): boolean {
+  return Array.from(event.dataTransfer?.types ?? []).includes('Files')
+}
+
+function onDragEnter(event: DragEvent) {
+  if (!hasDraggedFiles(event)) return
+  event.preventDefault()
+  dragDepth++
+  dragging.value = true
+}
+
+function onDragOver(event: DragEvent) {
+  if (!hasDraggedFiles(event)) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+
+function onDragLeave() {
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (dragDepth === 0) dragging.value = false
+}
+
+function onDrop(event: DragEvent) {
+  event.preventDefault()
+  dragDepth = 0
+  dragging.value = false
+  void addFiles(Array.from(event.dataTransfer?.files ?? []))
+}
+
 function onSubmit(text: string) {
   const t = text.trim()
   if (!t) return
@@ -49,8 +268,48 @@ function onSubmit(text: string) {
     message.warning('还没有选择模型：在下方选择，或到「设置 → 模型设置」配置')
     return
   }
+  if (canvas.busy) return
+  const picked = attachments.value.slice()
+  const prompt = composePrompt(t, picked)
+  const sent: ChatAttachment[] = picked.map((item) => ({
+    name: item.file.name,
+    kind: isImageFile(item.file) ? 'image' : 'file',
+    size: item.file.size,
+    preview: item.preview,
+  }))
   input.value = ''
-  sendPrompt(t, 1)
+  attachments.value = []
+  previewing.value = null
+  sendPrompt(prompt, 1, { displayText: t, attachments: sent })
+  nextTick(() => {
+    autosize()
+    textareaRef.value?.focus()
+  })
+}
+
+function submitInput() {
+  if (!canSend.value) return
+  onSubmit(input.value)
+}
+
+function onComposerKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+  event.preventDefault()
+  submitInput()
+}
+
+function onComposerPaste(event: ClipboardEvent) {
+  const files = Array.from(event.clipboardData?.files ?? [])
+  if (!files.length) return
+  event.preventDefault()
+  void addFiles(files)
+}
+
+function scrollToBottom() {
+  nextTick(() => {
+    const el = scrollRef.value
+    if (el) el.scrollTop = el.scrollHeight
+  })
 }
 
 // 新消息或流式更新时滚到底部
@@ -60,13 +319,11 @@ watch(
     canvas.generating.length +
     (canvas.generating.reduce((n, g) => n + g.html.length, 0) > 0 ? 1 : 0) +
     (canvas.agentRun ? (ws.messages.find((m) => m.id === canvas.agentRun!.messageId)?.content.length ?? 0) : 0),
-  () => {
-    nextTick(() => {
-      const el = scrollRef.value
-      if (el) el.scrollTop = el.scrollHeight
-    })
-  },
+  scrollToBottom,
 )
+
+// 附件条变高 / 变矮时保持最新消息可见
+watch(() => attachments.value.length, scrollToBottom)
 
 function fmtSelector(ctx: { tag: string; classes: string[]; text?: string }): string {
   const cls = ctx.classes.length ? '.' + ctx.classes.join('.') : ''
@@ -104,12 +361,17 @@ function pickStyle(msgId: string, s: PlanStyle) {
     pickedStyles[msgId] = s
   }
 }
-function findOriginalPrompt(msg: ChatMessage): string {
+function findOriginalMessage(msg: ChatMessage): ChatMessage | null {
   const idx = ws.messages.findIndex((m) => m.id === msg.id)
   for (let i = idx - 1; i >= 0; i--) {
-    if (ws.messages[i].role === 'user') return ws.messages[i].content
+    if (ws.messages[i].role === 'user') return ws.messages[i]
   }
-  return ''
+  return null
+}
+
+function findOriginalPrompt(msg: ChatMessage): string {
+  const origin = findOriginalMessage(msg)
+  return origin?.promptText || origin?.content || ''
 }
 
 const replanning = reactive(new Set<string>())
@@ -126,13 +388,16 @@ async function onReplan(msg: ChatMessage) {
 
 function startPlan(msg: ChatMessage) {
   if (!msg.plan || !msg.artboardId) return
-  const original = findOriginalPrompt(msg)
+  const origin = findOriginalMessage(msg)
+  const original = origin?.promptText || origin?.content || ''
   startFromPlan({
     boardId: msg.artboardId,
     originalPrompt: original,
     answers: { ...(answers[msg.id] ?? {}) },
     style: pickedStyles[msg.id] ?? null,
     items: msg.plan.items ?? [],
+    displayPrompt: origin?.content,
+    attachments: origin?.attachments ?? undefined,
   })
 }
 
@@ -182,6 +447,21 @@ const bubbleStyles = {
             <div v-if="msg.elementContext" class="ctx-chip">
               <code>{{ fmtSelector(msg.elementContext) }}</code>
               <span>针对该元素</span>
+            </div>
+            <div v-if="msg.attachments?.length" class="msg-attachments">
+              <template v-for="(file, i) in msg.attachments" :key="`${msg.id}-${i}`">
+                <img
+                  v-if="file.kind === 'image' && file.preview"
+                  :src="file.preview"
+                  :alt="file.name"
+                  :title="`${file.name} · ${fmtSize(file.size)}`"
+                  class="msg-attach-img"
+                />
+                <span v-else class="msg-attach-file" :title="`${file.name} · ${fmtSize(file.size)}`">
+                  <span class="msg-attach-ext">{{ extLabel(file.name) }}</span>
+                  <span class="msg-attach-name">{{ file.name }}</span>
+                </span>
+              </template>
             </div>
             <p>{{ msg.content }}</p>
           </div>
@@ -280,46 +560,150 @@ const bubbleStyles = {
     </div>
 
     <footer class="chat-footer">
-      <!-- v0 式 composer：控件全部收进输入框卡片 -->
-      <Sender
-        v-model:value="input"
-        :loading="canvas.busy"
-        :placeholder="placeholder"
-        :auto-size="{ minRows: 1, maxRows: 6 }"
-        class="composer"
-        :class="canvas.busy ? 'is-loading' : ''"
-        @submit="onSubmit"
-        @cancel="stopGeneration"
+      <!-- 工作区输入卡：附件缩略图在上方托盘，模型 / 思考在卡片下方 -->
+      <div
+        class="composer-shell"
+        @dragenter="onDragEnter"
+        @dragover="onDragOver"
+        @dragleave="onDragLeave"
+        @drop="onDrop"
       >
-        <template #footer>
-          <div class="composer-footer">
-            <button
-              class="think-chip"
-              :class="{ on: canvas.deepThink }"
-              title="深度思考：透传 reasoning_effort=high，仅部分模型支持"
-              @click="canvas.toggleDeepThink()"
+        <!-- 附件托盘：与输入卡上沿相接，对齐 UIRef sender-studio 的技能栏 -->
+        <div v-if="attachments.length" class="attach-tray" role="group" aria-label="已添加的参考图与资料">
+          <div class="attach-tray-row">
+            <div
+              v-for="item in attachments"
+              :key="item.id"
+              class="tray-tile"
+              :title="`${item.file.name} · ${fmtSize(item.file.size)}`"
             >
-              <AppIcon name="sparkle" :size="12" />
-              思考
-            </button>
-            <span class="flex1" />
-            <span class="header-note">AI 规划风格</span>
+              <button
+                v-if="item.preview"
+                type="button"
+                class="tray-preview"
+                :aria-label="`预览 ${item.file.name}`"
+                @click="openPreview(item)"
+              >
+                <img :src="item.preview" :alt="item.file.name" />
+              </button>
+              <span v-else class="tray-file">{{ extLabel(item.file.name) }}</span>
+              <button
+                type="button"
+                class="tray-x"
+                :aria-label="`移除 ${item.file.name}`"
+                @click="removeAttachment(item.id)"
+              >
+                <AppIcon name="close" :size="9" />
+              </button>
+            </div>
           </div>
-        </template>
-      </Sender>
-      <!-- 模型选择独立成行：不与输入框内控件互相挤压 -->
-      <div class="under-sender">
-        <Select
-          :value="settings.activeId || undefined"
-          size="small"
-          class="model-select"
-          :options="modelOptions"
-          :placeholder="settings.providers.length ? '选择模型' : '点击配置模型'"
-          placement="topLeft"
-          popup-class-name="composer-dropdown"
-          @change="(v: any) => onModelChange(v)"
-        />
+          <button type="button" class="tray-clear" title="清空附件" aria-label="清空附件" @click="clearAttachments">
+            <AppIcon name="trash" :size="13" />
+          </button>
+        </div>
+        <div class="composer-card" :class="{ 'is-loading': canvas.busy }">
+          <textarea
+            ref="textareaRef"
+            v-model="input"
+            rows="1"
+            class="composer-input"
+            :placeholder="placeholder"
+            aria-label="输入设计需求"
+            @keydown="onComposerKeydown"
+            @paste="onComposerPaste"
+          ></textarea>
+          <div class="composer-tools">
+            <button
+              type="button"
+              class="tool-icon"
+              title="添加图片或资料（也可拖入或粘贴）"
+              aria-label="添加图片或资料"
+              @click="pickFiles"
+            >
+              <AppIcon name="plus" :size="17" />
+            </button>
+            <span class="tools-spacer" />
+            <button
+              type="button"
+              class="send-btn"
+              :class="{ stop: canvas.busy }"
+              :disabled="!canvas.busy && !canSend"
+              :aria-label="canvas.busy ? '停止生成' : '发送'"
+              :aria-busy="canvas.busy"
+              @click="canvas.busy ? stopGeneration() : submitInput()"
+            >
+              <span v-if="canvas.busy" class="stop-square" aria-hidden="true" />
+              <AppIcon v-else name="arrow-up" :size="16" />
+            </button>
+          </div>
+        </div>
+        <!-- 模型与思考：收在 sender 卡片下方 -->
+        <div class="composer-under">
+          <div class="model-slot">
+            <Select
+              :value="settings.activeId || undefined"
+              size="small"
+              class="model-select"
+              :options="modelOptions"
+              :placeholder="settings.providers.length ? '选择模型' : '配置模型'"
+              placement="topLeft"
+              :popup-match-select-width="false"
+              popup-class-name="composer-dropdown"
+              @change="(v: any) => onModelChange(v)"
+            />
+          </div>
+          <button
+            type="button"
+            class="think-pill"
+            :class="{ on: canvas.deepThink }"
+            :aria-pressed="canvas.deepThink"
+            title="深度思考：透传 reasoning_effort=high，仅部分模型支持"
+            @click="canvas.toggleDeepThink()"
+          >
+            <AppIcon name="sparkle" :size="12" />
+            <span>思考</span>
+          </button>
+        </div>
+        <div v-if="dragging" class="drop-overlay" aria-hidden="true">
+          <AppIcon name="image" :size="18" />
+          <b>松开即可添加图片或资料</b>
+          <span>也支持在输入框里直接粘贴截图</span>
+        </div>
       </div>
+      <input
+        ref="fileInput"
+        type="file"
+        multiple
+        :accept="FILE_ACCEPT"
+        class="attach-input"
+        tabindex="-1"
+        aria-hidden="true"
+        @change="onFilePick"
+      />
+      <Teleport to="body">
+        <div
+          v-if="previewing"
+          class="attach-preview"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="previewing.file.name"
+          @click.self="closePreview"
+        >
+          <div class="attach-preview-panel">
+            <button
+              ref="previewCloseRef"
+              type="button"
+              class="attach-preview-close"
+              aria-label="关闭预览"
+              @click="closePreview"
+            >
+              <AppIcon name="close" :size="15" />
+            </button>
+            <img :src="previewing.preview" :alt="previewing.file.name" />
+            <div class="attach-preview-name">{{ previewing.file.name }}</div>
+          </div>
+        </div>
+      </Teleport>
     </footer>
   </aside>
 </template>
@@ -388,7 +772,7 @@ const bubbleStyles = {
 .user-bubble {
   max-width: 88%;
   background: var(--bg-elevated);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  box-shadow: var(--hairline-inset);
   color: var(--ink);
   border-radius: 14px 4px 14px 14px;
   padding: 9px 13px;
@@ -407,7 +791,7 @@ const bubbleStyles = {
   margin-bottom: 6px;
 }
 .ctx-chip code {
-  background: rgba(22, 119, 255, 0.16);
+  background: var(--accent-soft);
   color: var(--accent);
   font-family: var(--mono);
   font-size: 11px;
@@ -440,8 +824,8 @@ const bubbleStyles = {
 }
 /* 错误态：透明泡泡下的红色静默卡 */
 .bubble.error {
-  background: rgba(255, 84, 89, 0.07);
-  box-shadow: inset 0 0 0 1px rgba(255, 84, 89, 0.28);
+  background: var(--danger-soft);
+  box-shadow: inset 0 0 0 1px var(--danger-ring);
   border-radius: 10px;
   padding: 8px 12px;
 }
@@ -536,138 +920,485 @@ const bubbleStyles = {
 .chat-footer {
   padding: 12px 14px 14px;
 }
-/* —— wonder 式 composer：一块浮起的输入卡片，控件皆为静默 pill —— */
-.composer {
-  background: var(--bg-elevated) !important;
-  border: none !important;
-  border-radius: 14px !important;
-  padding: 4px !important;
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
-    0 10px 32px rgba(0, 0, 0, 0.45);
-  transition: box-shadow var(--dur) var(--ease);
+.composer-shell {
+  --composer-radius: 24px;
+  position: relative;
 }
-.composer:focus-within {
-  box-shadow:
-    inset 0 0 0 1px rgba(22, 119, 255, 0.45),
-    0 0 0 4px rgba(22, 119, 255, 0.1),
-    0 10px 32px rgba(0, 0, 0, 0.45);
+.attach-input {
+  display: none;
 }
-.composer :deep(.antd-sender-content) {
-  gap: 4px;
-}
-.composer :deep(.ant-input) {
-  padding: 8px 10px !important;
-  font-size: 13.5px;
-  color: var(--ink);
-  background: transparent !important;
-}
-.composer :deep(.ant-input::placeholder) {
-  color: var(--ink-3);
-}
-/* 发送 / 停止按钮：紫色高光圆钮 */
-.composer :deep(.antd-sender-actions-list .ant-btn) {
-  width: 30px;
-  height: 30px;
-  border: none !important;
-  color: var(--ink-3) !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  transition: filter var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
-}
-.composer :deep(.antd-sender-actions-list .ant-btn:not(:disabled)) {
-  background: var(--btn-primary-bg) !important;
-  box-shadow: var(--btn-primary-shadow) !important;
-  color: #fff !important;
-}
-.composer :deep(.antd-sender-actions-list .ant-btn:not(:disabled):hover) {
-  filter: brightness(1.1);
-}
-.composer.is-loading :deep(.antd-sender-actions-list .ant-btn:not(:disabled)) {
-  background: var(--bg-raised) !important;
-  box-shadow: var(--btn-quiet-shadow) !important;
-  color: var(--ink-2) !important;
-}
-.header-note {
-  font-size: 10.5px;
-  color: var(--ink-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.composer :deep(.antd-sender-footer) {
-  padding: 0 !important;
-  border-top: none !important;
-}
-.composer-footer {
+/* —— 附件托盘：与输入卡上沿相接的玻璃层（对齐 sender-studio 技能栏） —— */
+.attach-tray {
+  position: relative;
+  z-index: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 6px 6px 8px;
+  gap: 8px;
+  /* 左右内缩 = 卡片圆角半径，托盘边线正好落在圆角切点上，避免两侧楔形缺口 */
+  width: calc(100% - var(--composer-radius) * 2);
+  margin: 0 auto -1px;
+  padding: 4px 6px 4px 8px;
+  border: 1px solid var(--tray-border);
+  border-radius: 16px 16px 0 0;
+  background: var(--tray-bg);
+  box-shadow: var(--tray-shadow);
+  backdrop-filter: blur(20px) saturate(1.3);
+  animation: enter var(--dur) var(--ease);
 }
-.under-sender {
-  display: flex;
-  align-items: center;
-  margin-top: 6px;
-}
-.model-select {
-  /* 固定宽度：切换模型时选中文案长短不一，自适应宽度会导致整行跳动 */
-  flex: none;
-  width: 240px;
-}
-.model-select :deep(.ant-select-selector) {
-  border: none !important;
-  background: transparent !important;
-  box-shadow: var(--btn-quiet-shadow);
-  border-radius: 999px !important;
-  padding: 2px 9px !important;
-  font-size: 12px;
-  color: var(--ink-2) !important;
-  transition: background var(--dur-fast) var(--ease);
-}
-.model-select :deep(.ant-select-selector:hover) {
-  background: var(--bg-raised) !important;
-  color: var(--ink);
-}
-/* 打开/聚焦时压掉 antd 默认的蓝色光环，避免视觉闪动 */
-.model-select :deep(.ant-select-focused .ant-select-selector),
-.model-select :deep(.ant-select-open .ant-select-selector) {
-  border: none !important;
-  box-shadow: var(--btn-quiet-shadow) !important;
-  background: var(--bg-raised) !important;
-}
-.model-select :deep(.ant-select-arrow) {
-  color: var(--ink-3);
-  font-size: 10px;
-  inset-inline-end: 9px;
-}
-.flex1 {
+.attach-tray-row {
   flex: 1;
-}
-.think-chip {
-  display: inline-flex;
+  min-width: 0;
+  display: flex;
   align-items: center;
-  gap: 5px;
-  border: none;
-  box-shadow: var(--btn-quiet-shadow);
-  background: transparent;
-  color: var(--ink-2);
-  font-size: 12px;
-  padding: 3.5px 11px;
-  border-radius: 999px;
-  cursor: pointer;
-  white-space: nowrap;
-  font-family: var(--sans);
-  transition: all var(--dur-fast) var(--ease);
+  gap: 4px;
+  overflow-x: auto;
+  padding: 0 1px;
+  scrollbar-width: none;
 }
-.think-chip:hover {
+.attach-tray-row::-webkit-scrollbar {
+  display: none;
+}
+.tray-tile {
+  position: relative;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--bg-raised);
+  box-shadow: var(--hairline-inset);
+}
+.tray-preview {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: transparent;
+  cursor: zoom-in;
+}
+.tray-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.tray-file {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+.tray-x {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--scrim-btn-bg);
+  color: var(--ink-2);
+  opacity: 0;
+  transform: scale(0.8);
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+  transition:
+    opacity var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.tray-tile:hover .tray-x,
+.tray-tile:focus-within .tray-x {
+  opacity: 1;
+  transform: none;
+}
+.tray-x:hover {
+  color: var(--ink);
+  background: var(--scrim-btn-bg-hover);
+}
+.tray-clear {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.tray-clear:hover {
   color: var(--ink);
   background: var(--bg-raised);
 }
-.think-chip.on {
+.tray-preview:focus-visible,
+.tray-x:focus-visible,
+.tray-clear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* —— 图片附件预览：点击 chip 打开，Esc / 点击遮罩关闭 —— */
+.attach-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--preview-scrim);
+  backdrop-filter: blur(6px);
+}
+.attach-preview-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: min(560px, 86vw);
+  max-height: 82vh;
+  padding: 44px 18px 18px;
+  background: var(--bg-panel);
+  border-radius: 18px;
+  box-shadow: var(--shadow-modal);
+}
+.attach-preview-panel img {
+  display: block;
+  max-width: 100%;
+  max-height: 60vh;
+  border-radius: 10px;
+  object-fit: contain;
+}
+.attach-preview-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.attach-preview-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--scrim-border);
+  border-radius: 50%;
+  background: var(--scrim-btn-bg);
+  color: var(--ink-2);
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+.attach-preview-close:hover {
+  color: var(--ink);
+  background: var(--scrim-btn-bg-hover);
+}
+.attach-preview-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.tool-icon:focus-visible,
+.think-pill:focus-visible,
+.send-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.msg-attach-ext {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 8.5px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 4px;
+  padding: 5px 4px;
+}
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1.5px dashed rgba(22, 119, 255, 0.65);
+  border-radius: 24px;
+  background: var(--drop-bg);
+  color: var(--accent);
+  pointer-events: none;
+  backdrop-filter: blur(3px);
+}
+.drop-overlay b {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.drop-overlay span {
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+/* —— 用户气泡里的参考图 / 资料 —— */
+.msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 7px;
+}
+.msg-attach-img {
+  display: block;
+  width: 58px;
+  height: 58px;
+  object-fit: cover;
+  border-radius: 7px;
+  box-shadow: var(--hairline-inset);
+}
+.msg-attach-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 190px;
+  height: 24px;
+  padding: 0 7px 0 3px;
+  border-radius: 6px;
+  background: var(--hover);
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.msg-attach-ext {
+  padding: 3px 4px;
+  font-size: 8px;
+}
+.msg-attach-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* —— 工作区输入卡：textarea 在上、工具行在下（对齐 sender-studio） —— */
+.composer-card {
+  position: relative;
+  z-index: 1;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--composer-radius);
+  box-shadow: var(--composer-shadow);
+  transition:
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+.composer-card:focus-within {
+  border-color: rgba(22, 119, 255, 0.5);
+  box-shadow: var(--composer-shadow-focus);
+}
+.composer-input {
+  display: block;
+  width: 100%;
+  min-height: 56px;
+  max-height: 144px;
+  padding: 15px 16px 4px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 13.5px;
+  line-height: 20px;
+  resize: none;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.composer-input::-webkit-scrollbar {
+  display: none;
+}
+.composer-input::placeholder {
+  color: var(--ink-3);
+}
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 8px;
+}
+.tool-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.tool-icon:hover {
+  color: var(--ink);
+  background: var(--bg-raised);
+}
+.tools-spacer {
+  flex: 1;
+  min-width: 4px;
+}
+/* —— sender 下方：模型选择 + 深度思考 —— */
+.composer-under {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 0 2px;
+}
+.model-slot {
+  flex: none;
+  width: 176px;
+  max-width: 58%;
+  min-width: 0;
+}
+/* antdv-next 的 Select 根节点即选择框；根节点不带 scoped 属性，统一走 :deep */
+.model-slot :deep(.model-select.ant-select) {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 18px 0 10px;
+  border: none !important;
+  border-radius: 999px !important;
+  background: transparent !important;
+  box-shadow: var(--btn-quiet-shadow) !important;
+  font-size: 12px;
+  color: var(--ink-2);
+  transition: background var(--dur-fast) var(--ease);
+}
+.model-slot :deep(.model-select.ant-select:hover),
+.model-slot :deep(.model-select.ant-select-focused),
+.model-slot :deep(.model-select.ant-select-open) {
+  background: var(--bg-raised) !important;
+  box-shadow: var(--btn-quiet-shadow) !important;
+}
+.model-slot :deep(.ant-select-content) {
+  min-width: 0;
+  height: 28px;
+  overflow: hidden;
+  line-height: 28px;
+}
+.model-slot :deep(.ant-select-placeholder),
+.model-slot :deep(.ant-select-content-value),
+.model-slot :deep(.ant-select-content-has-value) {
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 28px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-slot :deep(.ant-select-placeholder) {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+.model-slot :deep(.ant-select-input) {
+  padding: 0;
+  font-size: 12px;
+}
+.model-slot :deep(.ant-select-suffix) {
+  color: var(--ink-3);
+  font-size: 10px;
+}
+.think-pill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: var(--btn-quiet-shadow);
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+.think-pill:hover {
+  color: var(--ink);
+  background: var(--bg-raised);
+}
+.think-pill.on {
   color: var(--accent);
   background: var(--accent-soft);
   box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.35);
+}
+.send-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--btn-primary-bg);
+  box-shadow: var(--btn-primary-shadow);
+  color: #fff;
+  cursor: pointer;
+  transition:
+    filter var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease);
+}
+.send-btn:not(:disabled):not(.stop):hover {
+  filter: brightness(1.1);
+}
+.send-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.send-btn.stop {
+  background: var(--bg-raised);
+  box-shadow: var(--btn-quiet-shadow);
+  color: var(--ink-2);
+}
+.stop-square {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: currentColor;
+}
+.flex1 {
+  flex: 1;
 }
 .style-select {
   display: none;

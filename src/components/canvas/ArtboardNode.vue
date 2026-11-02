@@ -5,6 +5,7 @@ import type { Artboard, ElementContext, FrameTool, InspectMeta, WheelPayload } f
 import { useCanvasStore } from '@/stores/canvas'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useLiveStore } from '@/stores/live'
+import { useThemeStore } from '@/stores/theme'
 import {
   captureLiveBoard,
   commitManualEdits,
@@ -29,6 +30,7 @@ const emit = defineEmits<{
 const canvas = useCanvasStore()
 const ws = useWorkspaceStore()
 const liveStore = useLiveStore()
+const themeStore = useThemeStore()
 
 const board = computed(() => props.artboard)
 
@@ -112,15 +114,19 @@ const streamingEntry = computed(() =>
 )
 const isStreaming = computed(() => streamingEntry.value !== undefined)
 
-const PLACEHOLDER = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><style>
+const placeholderHtml = computed(() => {
+  const bg = themeStore.isDark ? '#161616' : '#fbfbfc'
+  const ink = themeStore.isDark ? '#9a9da4' : 'rgba(17, 17, 20, 0.45)'
+  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><style>
   html,body{height:100%;margin:0}
-  body{display:flex;align-items:center;justify-content:center;background:#161616;color:#9a9da4;
+  body{display:flex;align-items:center;justify-content:center;background:${bg};color:${ink};
     font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;letter-spacing:.5px}
 </style></head><body><div>空画板 — 在左侧聊天中描述你想要的页面</div></body></html>`
+})
 
 const displayHtml = computed(() => {
-  if (isStreaming.value) return streamingEntry.value?.html || PLACEHOLDER
-  return ws.currentVersionOf(board.value)?.html ?? PLACEHOLDER
+  if (isStreaming.value) return streamingEntry.value?.html || placeholderHtml.value
+  return ws.currentVersionOf(board.value)?.html ?? placeholderHtml.value
 })
 
 // —— 缩略图 LOD：缩放较小时以静态快照替代活 iframe ——
@@ -733,8 +739,9 @@ async function doDelete() {
       <div v-if="isStreaming" class="stream-bar" />
     </div>
 
-    <!-- 底部居中悬浮工具条：点选反馈 / 手动编辑 / 画板菜单 -->
-    <div class="ab-toolbar" @pointerdown.stop @wheel.stop>
+    <!-- 底部居中悬浮工具条：点选反馈 / 手动编辑 / 画板菜单。
+         仅跟随当前画板：多块画板同时可见（如并排 / 并发生成）时不重复出现。 -->
+    <div v-if="selected" class="ab-toolbar" @pointerdown.stop @wheel.stop>
       <Tooltip :title="canvas.tool === 'comment' ? '点选反馈已开启：点击页面元素，让 AI 定向修改' : '点选反馈：点击页面元素让 AI 定向修改'">
         <button class="tool" :class="{ on: canvas.tool === 'comment' }" @click.stop="toggleTool('comment')">
           <AppIcon name="cursor" :size="14" />
@@ -849,9 +856,7 @@ async function doDelete() {
 }
 .artboard:hover:not(.dragging) {
   transform: translateY(-2px);
-  box-shadow:
-    0 0 0 1px var(--line-strong),
-    0 18px 44px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--shadow-lift);
 }
 .artboard.dragging {
   transition: none;
@@ -1010,6 +1015,17 @@ button.tool.on {
   background: var(--bg-elevated);
   box-shadow: var(--shadow-card);
   z-index: 6;
+  animation: toolbar-enter var(--dur-fast) var(--ease);
+}
+@keyframes toolbar-enter {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 .ab-toolbar-sep {
   flex: none;
@@ -1136,7 +1152,7 @@ button.tool.on {
   height: 42%;
   display: flex;
   flex-direction: column;
-  background: rgba(10, 10, 10, 0.94);
+  background: var(--console-bg);
   border-top: 1px solid var(--line-strong);
   z-index: 3;
 }
@@ -1294,13 +1310,11 @@ button.tool.on {
   position: fixed;
   z-index: 1000;
   min-width: 148px;
-  background: rgba(22, 22, 22, 0.94);
+  background: var(--glass-bg);
   backdrop-filter: blur(10px);
   border: none;
   border-radius: 10px;
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.09),
-    0 16px 48px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--shadow-popover);
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -1322,14 +1336,14 @@ button.tool.on {
   outline: none;
 }
 .ab-menu button.danger {
-  color: #ff5459;
+  color: var(--danger);
 }
 .ab-menu button.danger.solid {
-  background: rgba(255, 84, 89, 0.14);
-  color: #ff5459;
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 .ab-menu button.danger.solid:hover {
-  background: rgba(255, 84, 89, 0.22);
+  background: var(--danger-soft-strong);
 }
 .menu-divider {
   height: 1px;
@@ -1342,13 +1356,11 @@ button.tool.on {
   position: fixed;
   z-index: 1000;
   width: 238px;
-  background: rgba(22, 22, 22, 0.94);
+  background: var(--glass-bg);
   backdrop-filter: blur(10px);
   border: none;
   border-radius: 10px;
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.09),
-    0 16px 48px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--shadow-popover);
   padding: 8px;
   display: flex;
   flex-direction: column;

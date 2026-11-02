@@ -663,13 +663,11 @@ onBeforeUnmount(() => {
   bottom: 16px;
   display: flex;
   align-items: center;
-  background: rgba(22, 22, 22, 0.88);
+  background: var(--glass-bg);
   backdrop-filter: blur(10px);
   border: none;
   border-radius: 10px;
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
-    0 10px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-popover);
   padding: 4px;
   gap: 2px;
 }
@@ -732,7 +730,7 @@ onBeforeUnmount(() => {
   border-radius: 16px;
   color: var(--ink-3);
   box-shadow: var(--btn-quiet-shadow);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--btn-quiet-bg);
   margin-bottom: 10px;
 }
 .ic-empty p {

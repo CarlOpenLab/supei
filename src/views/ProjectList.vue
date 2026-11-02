@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { Input, Modal, Popconfirm, message } from 'antdv-next'
 import { useWorkspaceStore } from '@/stores/workspace'
 import AppIcon from '@/components/ui/AppIcon.vue'
+import ThemeToggle from '@/components/ui/ThemeToggle.vue'
 
 const router = useRouter()
 const ws = useWorkspaceStore()
@@ -58,6 +59,7 @@ function fmtDate(ts: number): string {
       </span>
       <span class="wordmark">原型画布</span>
       <span class="topbar-meta">Design Canvas · v0.1</span>
+      <ThemeToggle />
     </header>
 
     <main v-if="ready" class="content">
@@ -143,8 +145,8 @@ function fmtDate(ts: number): string {
   display: flex;
   flex-direction: column;
   background:
-    radial-gradient(900px 420px at 50% -8%, rgba(22, 119, 255, 0.1), transparent 62%),
-    radial-gradient(700px 360px at 88% 4%, rgba(255, 107, 71, 0.05), transparent 60%),
+    radial-gradient(900px 420px at 50% -8%, var(--glow-accent), transparent 62%),
+    radial-gradient(700px 360px at 88% 4%, var(--glow-spark), transparent 60%),
     var(--bg-canvas);
 }
 
@@ -157,8 +159,8 @@ function fmtDate(ts: number): string {
   height: 26px;
   z-index: 20;
   background:
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.16) 0 1px, transparent 1px 80px) left bottom / 100% 9px no-repeat,
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.07) 0 1px, transparent 1px 8px) left bottom / 100% 5px no-repeat,
+    repeating-linear-gradient(90deg, var(--ruler-major) 0 1px, transparent 1px 80px) left bottom / 100% 9px no-repeat,
+    repeating-linear-gradient(90deg, var(--ruler-minor) 0 1px, transparent 1px 8px) left bottom / 100% 5px no-repeat,
     var(--bg-panel);
   border-bottom: 1px solid var(--line);
 }
@@ -334,7 +336,7 @@ function fmtDate(ts: number): string {
   border-bottom: 1px dashed var(--line-strong);
 }
 .project-row.ghost:hover {
-  background: rgba(22, 119, 255, 0.05);
+  background: var(--accent-ghost);
 }
 .row-index {
   font-family: var(--mono);
