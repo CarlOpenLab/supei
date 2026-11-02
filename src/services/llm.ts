@@ -17,8 +17,15 @@ export async function* streamChat(opts: StreamChatOptions): AsyncGenerator<strin
   const { getDesktopBridge } = await import('./desktop')
   const bridge = await getDesktopBridge()
   if (bridge) {
-    yield* streamChatDesktop(bridge, opts)
-    return
+    try {
+      yield* streamChatDesktop(bridge, opts)
+      return
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') throw err
+      // 桥接失效（如普通浏览器打开 mygo dev 页面：注入的运行时时有时无）
+      // → 自动降级为浏览器直连，不让用户看到 "runtime not found"
+      if (!/runtime not found/.test((err as Error).message)) throw err
+    }
   }
   yield* streamChatBrowser(opts)
 }
@@ -56,6 +63,9 @@ async function* streamChatDesktop(
 
 /** 浏览器：fetch 直连（受 CORS 约束）。 */
 async function* streamChatBrowser(opts: StreamChatOptions): AsyncGenerator<string> {
+  if (!opts.baseURL) {
+    throw new Error('未配置模型服务地址。请到「设置 → 模型设置」检查服务商的 baseURL 字段。')
+  }
   const url = opts.baseURL.replace(/\/+$/, '') + '/chat/completions'
   let res: Response
   try {

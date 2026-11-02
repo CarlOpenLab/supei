@@ -214,6 +214,39 @@ func (StorageService) ReadPluginDir(ctx context.Context) ([]StyleFile, error) {
 	return out, nil
 }
 
+// WatchPluginDir watches the user plugin directory and streams a signal to
+// the page whenever a .md/.json plugin pack changes, so the frontend can
+// hot-reload plugins without restarting.
+func (StorageService) WatchPluginDir(ctx context.Context, out *mygo.Channel[string]) error {
+	dir, err := (StorageService{}).PluginDir(ctx)
+	if err != nil {
+		return err
+	}
+	watcher, err := mygo.WatchFiles(ctx, dir, mygo.FileWatchOptions{})
+	if err != nil {
+		return err
+	}
+	defer watcher.Close()
+	for {
+		events, err := watcher.Next(ctx)
+		if err != nil {
+			return err
+		}
+		for _, e := range events {
+			if e.IsDir {
+				continue
+			}
+			name := strings.ToLower(e.Path)
+			if strings.HasSuffix(name, ".md") || strings.HasSuffix(name, ".json") || strings.HasSuffix(name, ".txt") {
+				if err := out.Send(e.Path); err != nil {
+					return err
+				}
+				break // 一次目录变更只推一个信号
+			}
+		}
+	}
+}
+
 // ReadStyleFiles opens native file picker(s) and returns the raw contents of
 // the chosen .md/.json style packs.
 func (StorageService) ReadStyleFiles(ctx context.Context) ([]StyleFile, error) {

@@ -1,51 +1,88 @@
 /* ============================================================
-   AI 原型画布 — Dark Studio 设计系统
-   参考 Linear / Figma dark：统一深度分层、精确灰阶、
-   微妙边框、聚焦的强调色。所有表面同属一个深度体系。
+   AI 原型画布 — Wonder 设计语言
+   对齐 wonder.design：中性近黑分层、发丝描边、紫色高光、
+   Inter + Uncut Sans 紧排标题、JetBrains Mono 微标签。
+   所有表面同属一个深度体系。
    ============================================================ */
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/InterVariable.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Uncut Sans';
+  src: url('/fonts/UncutSans-Variable.ttf') format('truetype-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono.ttf') format('truetype-variations');
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
-  /* 深度分层（从画布外围到内容逐层抬亮） */
-  --bg-root: #08090a;        /* 最深：应用底 */
-  --bg-canvas: #101214;      /* 画布区 */
-  --bg-panel: #0d0f11;       /* 侧栏 / 顶栏 */
-  --bg-elevated: #15171b;    /* 卡片 / 输入卡 / 弹层 */
-  --bg-raised: #1b1e23;      /* 更高一层：hover 卡 / chip 底 */
+  /* 深度分层（中性近黑，从画布外围到内容逐层抬亮） */
+  --bg-root: #0a0a0a;        /* 最深：应用底 */
+  --bg-canvas: #101010;      /* 画布区 */
+  --bg-panel: #0d0d0d;       /* 侧栏 / 顶栏 */
+  --bg-elevated: #161616;    /* 卡片 / 输入卡 / 弹层 */
+  --bg-raised: #1c1c1c;      /* 更高一层：hover 卡 / chip 底 */
 
   /* 表面交互 */
   --hover: rgba(255, 255, 255, 0.045);
   --active: rgba(255, 255, 255, 0.08);
 
-  /* 线 */
+  /* 线：wonder 的发丝描边 */
   --line: rgba(255, 255, 255, 0.07);
   --line-strong: rgba(255, 255, 255, 0.13);
+  --hairline-inset: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 
   /* 文字 */
-  --ink: rgba(255, 255, 255, 0.92);
+  --ink: rgba(255, 255, 255, 0.95);
   --ink-2: rgba(255, 255, 255, 0.6);
-  --ink-3: rgba(255, 255, 255, 0.36);
+  --ink-3: rgba(255, 255, 255, 0.38);
 
-  /* 强调 */
-  --accent: #ff6b47;
-  --accent-deep: #e8552f;
-  --accent-soft: rgba(255, 107, 71, 0.12);
+  /* 强调：wonder 紫（oklab 0.54 / 0.145 / -0.146） */
+  --accent: #b05cf2;
+  --accent-deep: #9d49e0;
+  --accent-soft: rgba(176, 92, 242, 0.14);
+  --accent-ink: #1b0b2e;
+
+  /* 次强调：余烬橙（logo 火花，仅点缀） */
+  --spark: #ff6b47;
 
   /* 画布点缀 */
-  --canvas-dot: rgba(255, 255, 255, 0.055);
-  --canvas-glow: radial-gradient(1100px 480px at 70% -12%, rgba(255, 107, 71, 0.07), transparent 60%);
+  --canvas-dot: rgba(255, 255, 255, 0.05);
+  --canvas-glow: radial-gradient(1100px 480px at 70% -12%, rgba(176, 92, 242, 0.09), transparent 60%);
 
   /* 阴影：深色下用「提亮 + 大投影」而非黑影 */
   --shadow-card: 0 0 0 1px var(--line), 0 12px 32px rgba(0, 0, 0, 0.5);
   --shadow-float: 0 0 0 1px var(--line-strong), 0 24px 64px rgba(0, 0, 0, 0.6);
 
-  --sans:
-    -apple-system, 'SF Pro Text', 'PingFang SC', 'Microsoft YaHei', 'Segoe UI',
-    sans-serif;
-  --serif: Georgia, 'Songti SC', 'Noto Serif SC', 'SimSun', serif;
-  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  /* wonder 主按钮配方：顶部高光渐变 + 内发丝环 */
+  --btn-primary-bg:
+    linear-gradient(rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.05) 49%, rgba(0, 0, 0, 0) 51%),
+    var(--accent);
+  --btn-primary-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  --btn-quiet-bg: #1a1a1a;
+  --btn-quiet-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+
+  --sans: 'Inter', -apple-system, 'SF Pro Text', 'PingFang SC', 'Microsoft YaHei',
+    'Segoe UI', sans-serif;
+  --display: 'Uncut Sans', 'Inter', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
   --radius-s: 6px;
-  --radius-m: 10px;
-  --radius-l: 14px;
+  --radius-m: 8px;
+  --radius-l: 12px;
 
   /* 动效 */
   --dur-fast: 120ms;
@@ -78,10 +115,46 @@ body,
 
 body {
   font-family: var(--sans);
+  font-feature-settings: 'cv11', 'ss01';
   color: var(--ink);
   background: var(--bg-root);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+/* wonder 式展示标题：紧字距、紧行高 */
+.display-title {
+  font-family: var(--display);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.04;
+}
+
+/* mono 微标签：全大写 + 宽字距 */
+.kicker {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink-3);
+}
+
+/* wonder 式按钮质感覆盖（antd primary / 自绘通用） */
+.btn-wonder {
+  background: var(--btn-primary-bg);
+  box-shadow: var(--btn-primary-shadow);
+  color: #fff;
+  border: none;
+}
+.btn-wonder:hover {
+  filter: brightness(1.08);
+}
+.btn-quiet {
+  background: var(--btn-quiet-bg);
+  box-shadow: var(--btn-quiet-shadow);
+  color: var(--ink);
+  border: none;
 }
 
 ::-webkit-scrollbar {
@@ -100,5 +173,55 @@ body {
 }
 
 ::selection {
-  background: rgba(255, 107, 71, 0.3);
+  background: rgba(176, 92, 242, 0.32);
+}
+
+/* —— 浮层质感：发丝环 + 深投影（Modal / Popover / 下拉） —— */
+.ant-modal .ant-modal-content {
+  background: #161616;
+  border-radius: 12px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 24px 64px rgba(0, 0, 0, 0.6);
+}
+.ant-modal-mask {
+  background: rgba(0, 0, 0, 0.6) !important;
+}
+.ant-popover .ant-popover-inner,
+.ant-popconfirm .ant-popover-inner {
+  background: #1a1a1a;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 12px 40px rgba(0, 0, 0, 0.55);
+}
+.ant-select-dropdown,
+.ant-dropdown {
+  background: #1a1a1a !important;
+  border-radius: 10px !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 12px 40px rgba(0, 0, 0, 0.55) !important;
+}
+.ant-select-item {
+  border-radius: 6px !important;
+}
+.ant-select-item-option-active,
+.ant-select-item-option-hovered {
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+.ant-select-item-option-selected {
+  background: rgba(176, 92, 242, 0.14) !important;
+  color: var(--accent);
+}
+
+/* —— 全局主按钮：wonder 高光配方（红色危险按钮除外） —— */
+.ant-btn-primary:not(.ant-btn-dangerous):not(.ant-btn-variant-solid-danger) {
+  background: var(--btn-primary-bg) !important;
+  box-shadow: var(--btn-primary-shadow) !important;
+  border: none !important;
+  text-shadow: none;
+}
+.ant-btn-primary:not(.ant-btn-dangerous):not(.ant-btn-variant-solid-danger):not(:disabled):hover {
+  filter: brightness(1.09);
 }

@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { Viewport } from '@/types'
+import type { Artboard, Viewport } from '@/types'
 
 export const MIN_ZOOM = 0.15
 export const MAX_ZOOM = 3
@@ -23,6 +23,8 @@ export const useCanvasStore = defineStore('canvas', {
     deepThink: false,
     /** 拖拽对齐参考线（世界坐标）：v = 垂直线 x 值，h = 水平线 y 值 */
     guides: { v: [] as number[], h: [] as number[] },
+    /** 画板剪贴板（Ctrl+C/V）：存放画板快照，可重复粘贴 */
+    clipboard: null as Artboard | null,
   }),
   actions: {
     setViewport(vp: Partial<Viewport>) {
@@ -69,6 +71,9 @@ export const useCanvasStore = defineStore('canvas', {
       this.multi = this.multi.includes(id)
         ? this.multi.filter((x) => x !== id)
         : [...this.multi, id]
+    },
+    setMulti(ids: string[]) {
+      this.multi = ids
     },
     clearMulti() {
       this.multi = []

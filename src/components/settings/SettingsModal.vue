@@ -231,6 +231,18 @@ async function onImportFiles(e: Event) {
   )
 }
 
+/** 桌面壳：重新读取插件目录（~/.config/ai-design-canvas/plugins） */
+async function refreshFromDir() {
+  const bridge = await getDesktopBridge()
+  if (!bridge) return
+  const files = await bridge.Storage.readPluginDir()
+  if (!files?.length) {
+    message.info('插件目录为空：把 .md / .json 插件包放进去后点刷新')
+    return
+  }
+  await applyImport(files.map((f) => ({ name: f.name, text: f.content })))
+}
+
 async function importViaDesktop() {
   const bridge = await getDesktopBridge()
   if (!bridge) return
@@ -346,6 +358,7 @@ const kindOptions = (['style', 'preset', 'template'] as PluginKind[]).map((k) =>
               <input type="file" accept=".md,.json,.txt" multiple @change="onImportFiles" />
             </label>
             <Button size="small" @click="exportAll">导出全部</Button>
+            <Button v-if="IS_DESKTOP" size="small" @click="refreshFromDir">从插件目录刷新</Button>
             <span class="toolbar-hint">.md 风格包 / .json 插件包，导入即用</span>
           </div>
 
@@ -436,9 +449,11 @@ const kindOptions = (['style', 'preset', 'template'] as PluginKind[]).map((k) =>
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border: 1px solid var(--line);
+  border: none;
   border-radius: 10px;
-  padding: 10px 14px;
+  box-shadow: inset 0 0 0 1px var(--line);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 11px 14px;
 }
 .demo-row p {
   margin: 2px 0 0;
@@ -454,8 +469,10 @@ const kindOptions = (['style', 'preset', 'template'] as PluginKind[]).map((k) =>
   white-space: nowrap;
 }
 .provider-card {
-  border: 1px solid var(--line);
+  border: none;
   border-radius: 10px;
+  box-shadow: inset 0 0 0 1px var(--line);
+  background: rgba(255, 255, 255, 0.02);
   padding: 12px 14px;
   display: flex;
   flex-direction: column;

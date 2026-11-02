@@ -131,6 +131,24 @@ export const useWorkspaceStore = defineStore('workspace', {
       return copy
     },
 
+    /** 从剪贴板快照粘贴画板（含全部版本），连续粘贴自动级联偏移 */
+    async pasteArtboard(snap: Artboard): Promise<Artboard> {
+      const now = Date.now()
+      const copy: Artboard = {
+        ...JSON.parse(JSON.stringify(snap)),
+        id: uid('board'),
+        projectId: this.currentProjectId!,
+        parent: undefined,
+        x: snap.x + 48,
+        y: snap.y + 48,
+        createdAt: now,
+        updatedAt: now,
+      }
+      this.artboards.push(copy)
+      await db.putArtboard(copy)
+      return copy
+    },
+
     async removeArtboard(id: string) {
       await db.deleteArtboard(id)
       this.artboards = this.artboards.filter((b) => b.id !== id)

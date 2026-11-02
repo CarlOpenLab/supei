@@ -85,4 +85,12 @@ export const StorageService = {
   saveHTML(title: string, html: string): Promise<string> {
     return call("StorageService.SaveHTML", title, html);
   },
+  /**
+   * WatchPluginDir watches the user plugin directory and streams a signal to
+   * the page whenever a .md/.json plugin pack changes, so the frontend can
+   * hot-reload plugins without restarting.
+   */
+  watchPluginDir(out: Channel<string>): Promise<void> {
+    return call("StorageService.WatchPluginDir", out);
+  },
 } as const;
