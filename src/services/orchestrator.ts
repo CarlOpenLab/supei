@@ -271,10 +271,13 @@ export interface SendPromptOptions {
   displayText?: string
   /** 随用户消息展示的参考图 / 资料 */
   attachments?: ChatAttachment[]
+  /** 输入卡元素标签携带的点选上下文：反馈只作用于该元素，跳过意图确认直接生成 */
+  elementContext?: ElementContext | null
 }
 
 /**
  * 聊天面板发送指令：
+ * - 带 elementContext：定向元素反馈，直接增量生成（实时画板交给本机 Agent）
  * - variantCount = 1：选中空画板 → 首个版本；选中已有版本 → 迭代；无选中 → 新建画板
  * - variantCount > 1：忽略已有版本的画板，并排出 N 个方案（选中的空画板作为方案 A）
  */
@@ -286,11 +289,20 @@ export async function sendPrompt(text: string, variantCount = 1, options: SendPr
   if (!trimmed || cv.busy) return
   const displayText = options.displayText?.trim() || trimmed
   const attachments = options.attachments
+  const elementCtx = options.elementContext ?? null
 
   // 实时画板：对话直接交给本机 Agent 改仓库代码（网页实时画板没有源码，先捕获为设计稿）
   const selectedBoard = ws.findArtboard(cv.selectedArtboardId)
   if (selectedBoard?.kind === 'live') {
-    await sendLiveFeedback(selectedBoard, null, trimmed, { displayText, attachments })
+    await sendLiveFeedback(selectedBoard, elementCtx, trimmed, { displayText, attachments })
+    return
+  }
+
+  // 元素定向反馈：只改选中的元素，跳过意图确认，直接增量生成
+  if (elementCtx) {
+    const board = selectedBoard
+    if (!board || board.versions.length === 0) return
+    await runGeneration({ board, prompt: trimmed, isNew: false, elementContext: elementCtx, displayPrompt: displayText, attachments })
     return
   }
 
@@ -602,17 +614,6 @@ export async function replan(
   } finally {
     activeControllers.delete(ac)
   }
-}
-
-/** 画布上点选元素后的定向反馈 */
-export async function sendElementFeedback(ctx: ElementContext, text: string) {
-  const ws = useWorkspaceStore()
-  const cv = useCanvasStore()
-  const trimmed = text.trim()
-  if (!trimmed || cv.busy) return
-  const board = ws.findArtboard(cv.selectedArtboardId)
-  if (!board || board.versions.length === 0) return
-  await runGeneration({ board, prompt: trimmed, isNew: false, elementContext: ctx })
 }
 
 // —— 本机 Agent 改代码：实时画板反馈 / 设计稿写回 ——

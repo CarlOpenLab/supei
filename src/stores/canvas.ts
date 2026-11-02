@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { Artboard, ElementEdit, FrameTool, InspectMeta, Viewport } from '@/types'
+import type { Artboard, ElementContext, ElementEdit, FrameTool, InspectMeta, Viewport } from '@/types'
 
 export const MIN_ZOOM = 0.15
 export const MAX_ZOOM = 3
@@ -40,6 +40,8 @@ export const useCanvasStore = defineStore('canvas', {
     menuRequest: null as { artboardId: string; x: number; y: number } | null,
     /** 平铺生成后：请求把源画板和新画板一起收进视口 */
     revealRequest: null as { ids: string[]; seq: number } | null,
+    /** 点选反馈：当前选中的元素（格式化标签显示在输入卡，随下一次发送使用） */
+    pendingCtx: null as ElementContext | null,
   }),
   getters: {
     /** 有 AI 任务在跑（生成原型或 Agent 改代码）：聊天发送与规划按钮据此禁用，停止按钮据此出现 */

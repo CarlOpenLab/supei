@@ -49,7 +49,10 @@ let dragDepth = 0
 const MAX_INPUT_HEIGHT = 144
 
 const targetBoard = computed(() => ws.findArtboard(canvas.selectedArtboardId))
+/** 点选反馈：画布上选中的元素，格式化成标签贴在输入框里 */
+const pendingCtx = computed(() => canvas.pendingCtx)
 const placeholder = computed(() => {
+  if (pendingCtx.value) return '描述对这个元素的修改…'
   const b = targetBoard.value
   if (!b) return '描述你想要的页面…'
   if (b.kind === 'live') {
@@ -58,6 +61,16 @@ const placeholder = computed(() => {
   // 胶囊输入区较窄，不放画板标题，避免 placeholder 被截断
   return b.versions.length ? '描述要改的地方…' : '描述你想生成的页面…'
 })
+
+/** 点选元素后的一键指令（对齐原点选气泡的常用快捷指令） */
+const QUICK_CHIPS: Array<{ label: string; prompt: string }> = [
+  { label: '更醒目', prompt: '让这个元素更醒目：加大视觉重量与对比，但不要改变整体布局' },
+  { label: '更紧凑', prompt: '让这个元素更紧凑：减小内边距与字号，保持可读性' },
+  { label: '加圆角', prompt: '给这个元素加明显的圆角' },
+  { label: '加阴影', prompt: '给这个元素加一层柔和投影，提升层次感' },
+  { label: '换强调色', prompt: '为这个元素换一个更合适的强调色，设计稿其余部分不动' },
+  { label: '整体换配色', prompt: '整体换一套更高级的配色方案，保持布局与内容不变' },
+]
 
 const canSend = computed(() => input.value.trim().length > 0 && !canvas.busy)
 
@@ -82,6 +95,19 @@ watch(previewing, (item) => {
   if (item) nextTick(() => previewCloseRef.value?.focus())
   else nextTick(() => textareaRef.value?.focus())
 })
+
+// 点选元素后焦点移到输入框，直接描述修改
+watch(pendingCtx, (ctx) => {
+  if (ctx) nextTick(() => textareaRef.value?.focus())
+})
+
+// 切换选中画板后，原画板的元素选中态随之失效
+watch(
+  () => canvas.selectedArtboardId,
+  () => {
+    canvas.pendingCtx = null
+  },
+)
 const PRESETS = pluginRegistry
   .listByKind('preset')
   .map((p) => ({ icon: (p.data as PresetPluginData).icon, title: p.name, prompt: (p.data as PresetPluginData).prompt }))
@@ -265,6 +291,7 @@ function onSubmit(text: string) {
     return
   }
   if (canvas.busy) return
+  const ctx = canvas.pendingCtx
   const picked = attachments.value.slice()
   const prompt = composePrompt(t, picked)
   const sent: ChatAttachment[] = picked.map((item) => ({
@@ -276,11 +303,25 @@ function onSubmit(text: string) {
   input.value = ''
   attachments.value = []
   previewing.value = null
-  sendPrompt(prompt, 1, { displayText: t, attachments: sent })
+  canvas.pendingCtx = null
+  sendPrompt(prompt, 1, { displayText: t, attachments: sent, elementContext: ctx })
   nextTick(() => {
     autosize()
     textareaRef.value?.focus()
   })
+}
+
+/** 点选后的快捷指令：跳过输入直接发送 */
+function sendQuick(prompt: string) {
+  if (canvas.busy || !canvas.pendingCtx) return
+  if (!settings.active) {
+    message.warning('还没有选择模型：在下方选择，或到「设置 → 模型设置」配置')
+    return
+  }
+  const ctx = canvas.pendingCtx
+  canvas.pendingCtx = null
+  sendPrompt(prompt, 1, { elementContext: ctx })
+  nextTick(() => textareaRef.value?.focus())
 }
 
 function submitInput() {
@@ -289,6 +330,10 @@ function submitInput() {
 }
 
 function onComposerKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && canvas.pendingCtx) {
+    canvas.pendingCtx = null
+    return
+  }
   if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
   event.preventDefault()
   submitInput()
@@ -514,7 +559,7 @@ const bubbleStyles = {
           @update:style="onActivePlanStyle"
         />
       </div>
-      <!-- 工作区输入卡：附件缩略图在上方托盘，模型 / 思考在卡片下方 -->
+      <!-- 工作区输入卡：选中元素标签 + 附件托盘在上，模型 / 思考在卡片下方 -->
       <div
         class="composer-shell"
         @dragenter="onDragEnter"
@@ -522,6 +567,34 @@ const bubbleStyles = {
         @dragleave="onDragLeave"
         @drop="onDrop"
       >
+        <!-- 点选反馈：选中的元素以标签贴在输入框上方，× 取消选中 -->
+        <div v-if="pendingCtx" class="ctx-tray">
+          <span class="ctx-chip" :title="`已选中元素：${fmtSelector(pendingCtx)}`">
+            <AppIcon name="cursor" :size="11" class="ctx-icon" />
+            <code class="ctx-selector">{{ fmtSelector(pendingCtx) }}</code>
+          </span>
+          <button
+            type="button"
+            class="ctx-x"
+            aria-label="取消选中该元素"
+            title="取消选中（Esc）"
+            @click="canvas.pendingCtx = null"
+          >
+            <AppIcon name="close" :size="10" />
+          </button>
+          <div class="ctx-quick" role="group" aria-label="快捷指令">
+            <button
+              v-for="chip in QUICK_CHIPS"
+              :key="chip.label"
+              type="button"
+              class="ctx-quick-btn"
+              :disabled="canvas.busy"
+              @click="sendQuick(chip.prompt)"
+            >
+              {{ chip.label }}
+            </button>
+          </div>
+        </div>
         <!-- 附件托盘：与输入卡上沿相接，对齐 UIRef sender-studio 的技能栏 -->
         <div v-if="attachments.length" class="attach-tray" role="group" aria-label="已添加的参考图与资料">
           <div class="attach-tray-row">
@@ -881,6 +954,93 @@ const bubbleStyles = {
 }
 .attach-input {
   display: none;
+}
+/* —— 点选元素标签：贴在输入卡上方的选中态指示 —— */
+.ctx-tray {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% - var(--composer-radius) * 2);
+  margin: 0 auto -1px;
+  padding: 5px 6px 5px 8px;
+  border: 1px solid var(--tray-border);
+  border-radius: 16px 16px 0 0;
+  background: var(--tray-bg);
+  box-shadow: var(--tray-shadow);
+  backdrop-filter: blur(20px) saturate(1.3);
+  animation: enter var(--dur) var(--ease);
+}
+.ctx-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 60%;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--accent-ghost);
+  color: var(--accent);
+}
+.ctx-icon {
+  flex: none;
+}
+.ctx-selector {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ctx-x {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.ctx-x:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.ctx-quick {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ctx-quick::-webkit-scrollbar {
+  display: none;
+}
+.ctx-quick-btn {
+  flex: none;
+  padding: 3px 9px;
+  border: none;
+  border-radius: 999px;
+  background: var(--bg-raised);
+  box-shadow: var(--hairline-inset);
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.ctx-quick-btn:hover {
+  background: var(--accent-ghost);
+  color: var(--accent);
+}
+.ctx-quick-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 /* —— 附件托盘：与输入卡上沿相接的玻璃层（对齐 sender-studio 技能栏） —— */
 .attach-tray {

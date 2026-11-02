@@ -9,15 +9,12 @@ import { useThemeStore } from '@/stores/theme'
 import {
   captureLiveBoard,
   commitManualEdits,
-  sendElementFeedback,
-  sendLiveFeedback,
   writeBackToCode,
 } from '@/services/orchestrator'
 import { desktopAvailable, getDesktopBridge } from '@/services/desktop'
 import { getThumb } from '@/utils/thumb'
 import { HEADER_H } from './constants'
 import PrototypeFrame from './PrototypeFrame.vue'
-import ElementCommentBubble from './ElementCommentBubble.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import VersionCompareModal from './VersionCompareModal.vue'
 
@@ -305,8 +302,6 @@ function onHeaderPointerUp() {
 }
 
 // —— 元素点选与评论 ——
-const pendingCtx = ref<ElementContext | null>(null)
-
 function onNodePointerDown(e: PointerEvent) {
   if (e.shiftKey) {
     canvas.toggleMulti(board.value.id)
@@ -319,7 +314,7 @@ function onNodePointerDown(e: PointerEvent) {
 
 function onSelect(ctx: ElementContext) {
   if (canvas.tool !== 'comment' || isStreaming.value) return
-  pendingCtx.value = ctx
+  canvas.pendingCtx = ctx
 }
 
 /**
@@ -341,19 +336,11 @@ function onTextEdit(payload: { dcId: string; text: string }) {
   canvas.setEdit(board.value.id, payload.dcId, { text: payload.text })
 }
 
-async function onCommentSubmit(text: string) {
-  const ctx = pendingCtx.value
-  pendingCtx.value = null
-  if (!ctx) return
-  // 实时画板的反馈交给本机 Agent 改源码；HTML 原型交给 AI 改设计
-  if (isLive.value) await sendLiveFeedback(board.value, ctx, text)
-  else await sendElementFeedback(ctx, text)
-}
-
+// 生成中 / 切换工具 / Esc / 画板换版时，取消待发送的元素选中态
 watch(
   () => [isStreaming.value, canvas.tool, board.value.currentVersionId, canvas.escSignal] as const,
   () => {
-    pendingCtx.value = null
+    canvas.pendingCtx = null
   },
 )
 
@@ -651,14 +638,6 @@ async function doDelete() {
       </div>
       <div v-if="isStreaming" class="stream-bar" />
     </div>
-
-    <ElementCommentBubble
-      v-if="pendingCtx"
-      :ctx="pendingCtx"
-      :artboard-width="board.width"
-      @submit="onCommentSubmit"
-      @cancel="pendingCtx = null"
-    />
   </div>
 
   <VersionCompareModal

@@ -110,7 +110,7 @@ API keys are stored only in local localStorage. Desktop requests leave through t
 ## Typical Workflow
 
 1. New project → describe what you want in the chat (or tap a preset prompt); AI streams v1 artboard(s);
-2. Turn on the ⌖ select tool, click a page element, give targeted feedback in the bubble (or quick commands); AI produces a new flat board to the right via the incremental protocol;
+2. Turn on the ⌖ select tool and click a page element: the selection appears as a formatted chip in the composer (with one-tap quick commands like "more prominent" / "rounder"), describe the change and send — AI produces a new flat board to the right via the incremental protocol;
 3. Compare siblings with "方案对比", or open a board menu's "对比上一版" for diff highlights;
 4. "Export preview" produces the single-file interactive page for all artboards;
 5. Full shortcut list lives behind the in-app `?` help (17 entries).
