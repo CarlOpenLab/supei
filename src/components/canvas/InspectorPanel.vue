@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 检查器：编辑模式下选中元素的样式面板。修改先写入 canvas.edits（iframe 内实时预览），
- * 点「保存为新版本」时由 commitManualEdits 批量落到源 HTML。
+ * 点「保存」时由 commitManualEdits 在源画板右侧生成一块包含修改的新画板。
  */
 import { computed } from 'vue'
 import { message } from 'antdv-next'
@@ -134,7 +134,7 @@ async function save() {
   if (!sel.value) return
   try {
     const v = await commitManualEdits(sel.value.artboardId)
-    if (v) message.success('手动修改已保存为新版本')
+    if (v) message.success('已保存为新画板')
   } catch (err) {
     message.error((err as Error).message)
   }
@@ -292,7 +292,7 @@ function discard() {
     <footer v-if="pending" class="in-foot">
       <span>{{ pending }} 个元素有改动</span>
       <button class="in-btn" @click="discard">放弃</button>
-      <button class="in-btn primary" @click="save">保存为新版本</button>
+      <button class="in-btn primary" @click="save">保存为新画板</button>
     </footer>
   </aside>
 </template>

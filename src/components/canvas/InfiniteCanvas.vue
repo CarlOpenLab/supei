@@ -23,6 +23,8 @@ const gridStyle = computed(() => ({
 
 const zoomPercent = computed(() => `${Math.round(canvas.viewport.zoom * 100)}%`)
 
+const selectedBoard = computed(() => ws.findArtboard(canvas.selectedArtboardId))
+
 // —— 画板衍生连线：parent 右中 → child 左中 的三次贝塞尔 ——
 const links = computed(() => {
   const out: Array<{ id: string; d: string; childId: string }> = []
@@ -63,6 +65,45 @@ function focusBoard(id: string) {
   if (!b) return
   animateViewport(fitRect(b.x, b.y, b.width, b.height))
 }
+
+/** 底部工具栏：画板级工具作用于画布全局，菜单作用于当前选中画板 */
+function toggleTool(t: 'comment' | 'edit') {
+  canvas.setTool(canvas.tool === t ? null : t)
+}
+
+function openSelectedMenu(e: MouseEvent) {
+  const b = selectedBoard.value
+  if (!b) return
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  // 菜单向上弹出：x 居中对齐按钮，y 落在按钮上方
+  canvas.requestMenu(b.id, rect.left + rect.width / 2 - 80, rect.top - 218)
+}
+
+// 平铺生成后把源画板和新画板一起收进视口，避免新画板在屏幕外
+watch(
+  () => canvas.revealRequest?.seq,
+  () => {
+    const req = canvas.revealRequest
+    if (!req) return
+    const boards = req.ids
+      .map((id) => ws.findArtboard(id))
+      .filter((b): b is Artboard => !!b)
+    if (!boards.length) return
+    const minX = Math.min(...boards.map((b) => b.x))
+    const minY = Math.min(...boards.map((b) => b.y))
+    const maxX = Math.max(...boards.map((b) => b.x + b.width))
+    const maxY = Math.max(...boards.map((b) => b.y + b.height))
+    animateViewport(fitRect(minX, minY, maxX - minX, maxY - minY, 100))
+  },
+)
+
+// 没有选中画板时退出编辑点选，避免检查器悬空
+watch(
+  () => canvas.selectedArtboardId,
+  (id) => {
+    if (!id) canvas.setTool(null)
+  },
+)
 
 // —— 缩放（容器内坐标）——
 // rAF 阻尼：滚轮只更新目标值，逐帧逼近，锚点（光标下的世界坐标）保持不动
@@ -293,6 +334,10 @@ async function handleHotkey(key: string, mods: { ctrl: boolean; meta: boolean; s
     return
   }
   if (key === 'Escape') {
+    if (canvas.handMode) {
+      canvas.toggleHand()
+      return
+    }
     if (compareActive.value) {
       compareIds.value = []
       return
@@ -394,6 +439,17 @@ function onSpaceUp(e: KeyboardEvent) {
   window.removeEventListener('keyup', onSpaceUp, true)
 }
 
+/** 抓手模式：从画布任意位置（包括画板 iframe 上方）起手拖动 */
+function onHandPointerDown(e: PointerEvent) {
+  if (e.button !== 0) return
+  e.preventDefault()
+  stopViewAnims()
+  panning.value = true
+  panMoved = false
+  panLast = { x: e.clientX, y: e.clientY }
+  containerRef.value!.setPointerCapture(e.pointerId)
+}
+
 function onPointerDown(e: PointerEvent) {
   const target = e.target as HTMLElement
   const onBackground = target === containerRef.value || target.classList.contains('ic-world')
@@ -428,7 +484,7 @@ function onPointerMove(e: PointerEvent) {
 function onPointerUp() {
   if (panning.value) {
     panning.value = false
-    if (!panMoved) canvas.select(null)
+    if (!panMoved && !canvas.handMode) canvas.select(null)
     return
   }
   if (marquee.value) {
@@ -559,6 +615,59 @@ onBeforeUnmount(() => {
 
     <div v-if="marquee" class="ic-marquee" :style="marqueeStyle" aria-hidden="true" />
 
+    <!-- 抓手模式：盖住画板与 iframe，左键拖动画布 -->
+    <div v-if="canvas.handMode" class="ic-hand-layer" @pointerdown.stop="onHandPointerDown" />
+
+    <div v-if="ws.artboards.length || canvas.handMode" class="ic-tools" @pointerdown.stop @wheel.stop>
+      <button
+        class="tool"
+        :class="{ on: canvas.handMode }"
+        :title="canvas.handMode ? '抓手已开启：按住左键拖动画布' : '抓手：拖动画布'"
+        @click="canvas.toggleHand()"
+      >
+        <AppIcon name="hand" :size="14" />
+      </button>
+      <button
+        class="tool"
+        :class="{ on: canvas.tool === 'comment' }"
+        :disabled="!selectedBoard"
+        :title="
+          !selectedBoard
+            ? '先选中一块画板'
+            : canvas.tool === 'comment'
+              ? '点选反馈已开启：点击页面元素，让 AI 定向修改'
+              : '点选反馈：点击页面元素让 AI 定向修改'
+        "
+        @click="toggleTool('comment')"
+      >
+        <AppIcon name="cursor" :size="14" />
+      </button>
+      <button
+        class="tool"
+        :class="{ on: canvas.tool === 'edit' }"
+        :disabled="!selectedBoard"
+        :title="
+          !selectedBoard
+            ? '先选中一块画板'
+            : canvas.tool === 'edit'
+              ? '手动编辑已开启：点选元素在右侧调整，双击改字，Alt 悬停测距'
+              : '手动编辑：像设计工具一样直接调整元素'
+        "
+        @click="toggleTool('edit')"
+      >
+        <AppIcon name="pencil" :size="13" />
+      </button>
+      <span class="ic-tools-sep" />
+      <button
+        class="tool"
+        :disabled="!selectedBoard"
+        :title="selectedBoard ? `画板菜单：${selectedBoard.title}（右键画板同样打开）` : '先选中一块画板'"
+        @click="openSelectedMenu"
+      >
+        <AppIcon name="dots" :size="14" />
+      </button>
+    </div>
+
     <div class="ic-controls">
       <button
         v-if="compareGroup"
@@ -581,7 +690,7 @@ onBeforeUnmount(() => {
     <div v-if="!ws.artboards.length" class="ic-empty">
       <div class="empty-icon"><AppIcon name="frame" :size="40" /></div>
       <p>画布还是空的</p>
-      <p class="sub">在左侧聊天里描述你想要的页面，AI 会在这里生成原型画板</p>
+      <p class="sub">在左侧聊天里描述你想要的页面或组件，AI 会在这里生成画板</p>
     </div>
   </div>
 </template>
@@ -657,6 +766,66 @@ onBeforeUnmount(() => {
 .ic-root.space-pan:active {
   cursor: grabbing;
 }
+/* 抓手模式的全画布热区：盖住画板与 iframe，工具栏 / 缩放条浮在它上面 */
+.ic-hand-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  cursor: grab;
+  touch-action: none;
+}
+.ic-hand-layer:active {
+  cursor: grabbing;
+}
+/* 画布底部居中：画板级工具（点选反馈 / 手动编辑 / 画板菜单） */
+.ic-tools {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 5px;
+  border-radius: 10px;
+  background: rgba(22, 22, 22, 0.88);
+  backdrop-filter: blur(10px);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 10px 32px rgba(0, 0, 0, 0.45);
+  z-index: 30;
+}
+.ic-tools .tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.ic-tools .tool:hover:not(:disabled) {
+  background: var(--active);
+  color: var(--ink);
+}
+.ic-tools .tool.on {
+  background: var(--accent);
+  color: #fff;
+}
+.ic-tools .tool:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.ic-tools-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--line);
+}
 .ic-controls {
   position: absolute;
   right: 16px;
@@ -670,6 +839,7 @@ onBeforeUnmount(() => {
   box-shadow: var(--shadow-popover);
   padding: 4px;
   gap: 2px;
+  z-index: 30;
 }
 .ic-controls button {
   border: none;

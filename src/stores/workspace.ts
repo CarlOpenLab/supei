@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { Artboard, CaptureSource, ChatAttachment, ChatMessage, ChatRole, ElementContext, LiveSource, PlanPayload, Project, Version } from '@/types'
+import type { Artboard, ArtifactMode, CaptureSource, ChatAttachment, ChatMessage, ChatRole, ElementContext, LiveSource, PlanPayload, Project, Version } from '@/types'
 import * as db from '@/services/db'
 import { uid } from '@/utils/id'
 
@@ -11,6 +11,7 @@ export interface NewArtboardInput {
   y: number
   parent?: string
   kind?: Artboard['kind']
+  artifactMode?: ArtifactMode
   live?: LiveSource
   capture?: CaptureSource
 }
@@ -96,6 +97,7 @@ export const useWorkspaceStore = defineStore('workspace', {
         projectId: this.currentProjectId!,
         title: input.title || '未命名画板',
         kind: input.kind,
+        artifactMode: input.artifactMode,
         live: input.live,
         capture: input.capture,
         parent: input.parent,
@@ -115,6 +117,15 @@ export const useWorkspaceStore = defineStore('workspace', {
 
     findArtboard(id: string | null): Artboard | null {
       return this.artboards.find((b) => b.id === id) ?? null
+    },
+
+    /** 写入画板产物类型（首版生成时确定；幂等） */
+    async setArtifactMode(artboardId: string, artifactMode: ArtifactMode) {
+      const b = this.findArtboard(artboardId)
+      if (!b || b.artifactMode === artifactMode) return
+      b.artifactMode = artifactMode
+      b.updatedAt = Date.now()
+      await db.putArtboard(b)
     },
 
     /** 仅更新内存位置（拖拽过程），落盘用 persistArtboard */

@@ -55,6 +55,12 @@ export interface ElementEdit {
 
 export type ChatRole = 'user' | 'assistant'
 
+/** 产物类型：整页原型或单个 UI 组件 */
+export type ArtifactMode = 'page' | 'component'
+
+/** 规划阶段的判断结果；ambiguous 表示需要用户选择 */
+export type PlannedArtifactMode = ArtifactMode | 'ambiguous'
+
 /** AI 规划卡：对话流里的澄清问题与风格方案，用户点选后才开始生成 */
 export interface PlanQuestion {
   id: string
@@ -81,6 +87,8 @@ export interface PlanPayload {
   iteration?: boolean
   /** 信息展示卡（多方案方向）：不可点选 */
   info?: boolean
+  /** 产物类型判断；ambiguous 时类型问题由应用补充、默认不预选 */
+  artifactMode?: PlannedArtifactMode
 }
 
 /** 随用户消息发送的参考图 / 资料：图片存压缩后的缩略图，文件只留元信息 */
@@ -140,6 +148,8 @@ export interface Artboard {
   title: string
   /** 缺省为 'html'（AI / 手动编辑的 HTML 原型）；'live' 为实时画板 */
   kind?: 'html' | 'live'
+  /** 产物类型：缺省视为 page；首版生成时确定，之后迭代不再改变 */
+  artifactMode?: ArtifactMode
   live?: LiveSource
   capture?: CaptureSource
   /** 衍生自哪块画板（多方案/副本时指向父画板），用于连线可视化 */

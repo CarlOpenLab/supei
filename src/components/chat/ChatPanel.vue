@@ -5,16 +5,15 @@ import { Select, message } from 'antdv-next'
 import { useCanvasStore } from '@/stores/canvas'
 import { useSettingsStore } from '@/stores/settings'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { replan, retryLast, sendPrompt, startFromPlan, stopGeneration } from '@/services/orchestrator'
+import { retryLast, sendPrompt, stopGeneration } from '@/services/orchestrator'
 import { pluginRegistry } from '@/plugins/registry'
 import type { PresetPluginData } from '@/plugins/types'
 import type { ChatAttachment, ChatMessage, PlanStyle } from '@/types'
 import AppIcon from '@/components/ui/AppIcon.vue'
-
+import PlanCard from '@/components/chat/PlanCard.vue'
 const canvas = useCanvasStore()
 const ws = useWorkspaceStore()
 const settings = useSettingsStore()
-
 const input = ref('')
 const scrollRef = ref<HTMLElement | null>(null)
 
@@ -50,7 +49,6 @@ let dragDepth = 0
 const MAX_INPUT_HEIGHT = 144
 
 const targetBoard = computed(() => ws.findArtboard(canvas.selectedArtboardId))
-
 const placeholder = computed(() => {
   const b = targetBoard.value
   if (!b) return '描述你想要的页面…'
@@ -84,11 +82,9 @@ watch(previewing, (item) => {
   if (item) nextTick(() => previewCloseRef.value?.focus())
   else nextTick(() => textareaRef.value?.focus())
 })
-
 const PRESETS = pluginRegistry
   .listByKind('preset')
   .map((p) => ({ icon: (p.data as PresetPluginData).icon, title: p.name, prompt: (p.data as PresetPluginData).prompt }))
-
 function fmtTime(ts: number): string {
   const d = new Date(ts)
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
@@ -305,14 +301,15 @@ function onComposerPaste(event: ClipboardEvent) {
   void addFiles(files)
 }
 
+// 新消息或流式更新时滚到底部
 function scrollToBottom() {
   nextTick(() => {
-    const el = scrollRef.value
-    if (el) el.scrollTop = el.scrollHeight
+    requestAnimationFrame(() => {
+      const el = scrollRef.value
+      if (el) el.scrollTop = el.scrollHeight
+    })
   })
 }
-
-// 新消息或流式更新时滚到底部
 watch(
   () =>
     ws.messages.length +
@@ -329,11 +326,18 @@ function fmtSelector(ctx: { tag: string; classes: string[]; text?: string }): st
   const cls = ctx.classes.length ? '.' + ctx.classes.join('.') : ''
   return `<${ctx.tag}${cls}>${ctx.text ? ' ' + ctx.text : ''}`
 }
-
-const generatingText = computed(() => '正在生成原型…')
-
+const generatingText = computed(() => {
+  const mode = targetBoard.value?.artifactMode
+  if (mode === 'component') return '正在生成组件…'
+  if (mode === 'page') return '正在生成原型…'
+  return '正在生成…'
+})
+/** 空态预设：先取消选中，确保总是在新画板上生成，而不是迭代当前页面 */
+function usePreset(prompt: string) {
+  canvas.select(null)
+  sendPrompt(prompt, 1)
+}
 // 风格下拉：内置 + 自定义分组
-
 // 模型选择：来自设置里的服务商列表；只展示模型名，太长时省略号截断
 const modelOptions = computed(() =>
   settings.providers.map((p) => ({
@@ -341,64 +345,59 @@ const modelOptions = computed(() =>
     value: p.id,
   })),
 )
-
 function onModelChange(id: string) {
   settings.activeId = id
   settings.save()
 }
-
-// —— 规划托盘的本地点选状态（按消息 id 隔离）——
+// —— 确认卡状态（按消息 id 隔离）：卡片只负责当前答案，提交后仍可回看 ——
 const answers = reactive<Record<string, Record<string, string>>>({})
 const pickedStyles = reactive<Record<string, PlanStyle>>({})
 
-function pickAnswer(msgId: string, qid: string, opt: string) {
-  answers[msgId] = { ...(answers[msgId] ?? {}), [qid]: opt }
+function onPlanAnswers(msgId: string, value: Record<string, string>) {
+  if (Object.keys(value).length) answers[msgId] = value
+  else delete answers[msgId]
 }
-function pickStyle(msgId: string, s: PlanStyle) {
-  if (pickedStyles[msgId]?.name === s.name) {
-    delete pickedStyles[msgId] // 再次点击 = 取消选定
-  } else {
-    pickedStyles[msgId] = s
+
+function onPlanStyle(msgId: string, value: PlanStyle | null) {
+  if (value) pickedStyles[msgId] = value
+  else delete pickedStyles[msgId]
+}
+
+/** 这次确认是否已经产出结果：新画板有版本，或迭代卡之后多出了子画板 */
+function planHasOutcome(msg: ChatMessage): boolean {
+  const plan = msg.plan
+  if (!plan || plan.info || !msg.artboardId) return false
+  const board = ws.findArtboard(msg.artboardId)
+  if (!board) return false
+  if (plan.iteration) {
+    return ws.artboards.some((b) => b.parent === board.id && b.createdAt >= msg.createdAt)
   }
+  return board.versions.length > 0
 }
-function findOriginalMessage(msg: ChatMessage): ChatMessage | null {
-  const idx = ws.messages.findIndex((m) => m.id === msg.id)
-  for (let i = idx - 1; i >= 0; i--) {
-    if (ws.messages[i].role === 'user') return ws.messages[i]
+
+/** 只有最近一张尚未产出结果的确认卡会贴到输入框上方 */
+const activePlanMsg = computed<ChatMessage | null>(() => {
+  for (let i = ws.messages.length - 1; i >= 0; i--) {
+    const msg = ws.messages[i]
+    if (msg.plan && !msg.plan.info && !planHasOutcome(msg)) return msg
   }
   return null
+})
+const activePlanAnswers = computed(() => {
+  const msg = activePlanMsg.value
+  return msg ? answers[msg.id] : undefined
+})
+const activePlanStyle = computed(() => {
+  const msg = activePlanMsg.value
+  return msg ? pickedStyles[msg.id] : undefined
+})
+function onActivePlanAnswers(value: Record<string, string>) {
+  const msg = activePlanMsg.value
+  if (msg) onPlanAnswers(msg.id, value)
 }
-
-function findOriginalPrompt(msg: ChatMessage): string {
-  const origin = findOriginalMessage(msg)
-  return origin?.promptText || origin?.content || ''
-}
-
-const replanning = reactive(new Set<string>())
-
-async function onReplan(msg: ChatMessage) {
-  if (!msg.plan || !msg.artboardId || replanning.has(msg.id)) return
-  replanning.add(msg.id)
-  try {
-    await replan(msg.artboardId, msg.id, findOriginalPrompt(msg))
-  } finally {
-    replanning.delete(msg.id)
-  }
-}
-
-function startPlan(msg: ChatMessage) {
-  if (!msg.plan || !msg.artboardId) return
-  const origin = findOriginalMessage(msg)
-  const original = origin?.promptText || origin?.content || ''
-  startFromPlan({
-    boardId: msg.artboardId,
-    originalPrompt: original,
-    answers: { ...(answers[msg.id] ?? {}) },
-    style: pickedStyles[msg.id] ?? null,
-    items: msg.plan.items ?? [],
-    displayPrompt: origin?.content,
-    attachments: origin?.attachments ?? undefined,
-  })
+function onActivePlanStyle(value: PlanStyle | null) {
+  const msg = activePlanMsg.value
+  if (msg) onPlanStyle(msg.id, value)
 }
 
 // AI 消息不做「泡泡」：透明内容 + 纯文本排版（v0 / wonder 式阅读体验）
@@ -413,7 +412,6 @@ const bubbleStyles = {
   },
 }
 </script>
-
 <template>
   <aside class="chat-panel">
     <header class="chat-header">
@@ -422,23 +420,21 @@ const bubbleStyles = {
         {{ targetBoard ? targetBoard.title : '新画板' }}
       </span>
     </header>
-
     <div ref="scrollRef" class="chat-scroll">
       <div v-if="!ws.messages.length" class="chat-empty">
-        <p class="lead">从一句话开始一个原型</p>
-        <p class="sub">生成后点击页面元素即可定向反馈，AI 只改你指的地方</p>
+        <p class="lead">从一句话开始一个页面或组件</p>
+        <p class="sub">生成后点击元素即可定向反馈，AI 只改你指的地方</p>
         <button
           v-for="p in PRESETS"
           :key="p.title"
           class="preset"
-          @click="sendPrompt(p.prompt, 1)"
+          @click="usePreset(p.prompt)"
         >
           <AppIcon :name="p.icon" :size="14" class="preset-icon" />
           <span class="preset-title">{{ p.title }}</span>
           <AppIcon name="arrow-right" :size="12" class="preset-arrow" />
         </button>
       </div>
-
       <template v-for="msg in ws.messages" :key="msg.id">
         <!-- 用户消息 -->
         <div v-if="msg.role === 'user'" class="chat-item user">
@@ -466,71 +462,19 @@ const bubbleStyles = {
             <p>{{ msg.content }}</p>
           </div>
         </div>
-        <!-- AI 消息：规划托盘（对齐 bolt.diy ToolApprovalTray 范式） -->
-        <div v-else-if="msg.plan" class="chat-item assistant">
-          <section class="plan-tray">
-            <p class="plan-tray-title">{{ msg.content }}</p>
-            <ul class="plan-list">
-              <li v-for="(item, i) in msg.plan.items ?? []" :key="'i' + i" class="plan-row">
-                <span class="plan-style-body">
-                  <b>{{ i + 1 }}. {{ item }}</b>
-                </span>
-              </li>
-              <li v-for="q in msg.plan.questions" :key="q.id" class="plan-row column">
-                <p class="plan-row-label">{{ q.q }}</p>
-                <div class="plan-opts">
-                  <button
-                    v-for="opt in q.options"
-                    :key="opt"
-                    class="plan-opt"
-                    :class="{ picked: answers[msg.id]?.[q.id] === opt }"
-                    @click="pickAnswer(msg.id, q.id, opt)"
-                  >
-                    {{ opt }}
-                  </button>
-                </div>
-              </li>
-              <li v-for="s in msg.plan.styles" :key="s.name" class="plan-row">
-                <span class="plan-style-body">
-                  <b>{{ s.name }}</b>
-                  <small>{{ s.desc }}</small>
-                </span>
-                <button
-                  v-if="!msg.plan.info"
-                  class="tray-btn solid"
-                  :class="{ done: pickedStyles[msg.id]?.name === s.name }"
-                  @click="pickStyle(msg.id, s)"
-                >
-                  {{ pickedStyles[msg.id]?.name === s.name ? '已选定' : '选定' }}
-                </button>
-              </li>
-            </ul>
-            <div class="plan-tray-footer">
-              <button
-                class="tray-btn"
-                :disabled="replanning.has(msg.id) || canvas.busy"
-                @click="onReplan(msg)"
-              >
-                <AppIcon name="refresh" :size="11" />
-                {{ replanning.has(msg.id) ? '规划中…' : '换一批' }}
-              </button>
-              <span class="flex1" />
-              <span v-if="pickedStyles[msg.id]" class="plan-picked-note">
-                已选「{{ pickedStyles[msg.id].name }}」
-              </span>
-              <button
-                class="tray-btn solid"
-                :disabled="canvas.busy || replanning.has(msg.id)"
-                @click="startPlan(msg)"
-              >
-                <AppIcon name="sparkle" :size="12" />
-                {{ msg.plan.iteration ? '按拆解执行' : '开始生成' }}
-              </button>
-            </div>
-          </section>
+        <!-- AI 消息：确认卡 / 信息卡；当前待确认的那张停靠在输入框上方 -->
+        <div v-else-if="msg.plan && msg.id !== activePlanMsg?.id" class="chat-item assistant">
+          <PlanCard
+            :msg="msg"
+            :completed="planHasOutcome(msg)"
+            :answers="answers[msg.id]"
+            :style="pickedStyles[msg.id]"
+            @update:answers="(v) => onPlanAnswers(msg.id, v)"
+            @update:style="(s) => onPlanStyle(msg.id, s)"
+          />
         </div>
         <!-- AI 消息：普通文本 -->
-        <div v-else class="chat-item assistant">
+        <div v-else-if="!msg.plan" class="chat-item assistant">
           <div class="assistant-col">
             <Bubble
               :content="msg.content"
@@ -553,13 +497,23 @@ const bubbleStyles = {
           </div>
         </div>
       </template>
-
       <div v-if="canvas.generating.length > 0" class="chat-item assistant">
         <Bubble :content="generatingText" loading placement="start" variant="filled" :styles="bubbleStyles" class="bubble" />
       </div>
     </div>
-
     <footer class="chat-footer">
+      <!-- 待确认的计划直接停在输入框上方，确认后回到对话流里收起 -->
+      <div v-if="activePlanMsg" class="plan-dock">
+        <PlanCard
+          :key="activePlanMsg.id"
+          :msg="activePlanMsg"
+          active
+          :answers="activePlanAnswers"
+          :style="activePlanStyle"
+          @update:answers="onActivePlanAnswers"
+          @update:style="onActivePlanStyle"
+        />
+      </div>
       <!-- 工作区输入卡：附件缩略图在上方托盘，模型 / 思考在卡片下方 -->
       <div
         class="composer-shell"
@@ -707,7 +661,6 @@ const bubbleStyles = {
     </footer>
   </aside>
 </template>
-
 <style scoped>
 .chat-panel {
   width: 344px;
@@ -750,6 +703,8 @@ const bubbleStyles = {
 .chat-scroll {
   flex: 1;
   overflow-y: auto;
+  /* 分步卡切换会改变内容高度；关掉滚动锚定，交给底部跟随逻辑 */
+  overflow-anchor: none;
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -1403,138 +1358,19 @@ const bubbleStyles = {
 .style-select {
   display: none;
 }
-
-/* —— 规划托盘（对齐 bolt.diy ToolApprovalTray 范式：托盘卡 + divide-y 列表 + 右侧操作）—— */
-.plan-tray {
-  width: 100%;
-  max-width: 94%;
-  background: var(--bg-elevated);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-m);
-  box-shadow: var(--shadow-card);
-  overflow: hidden;
+/* —— 待确认的计划直接停在输入框上方 —— */
+.plan-dock {
+  margin-bottom: 6px;
+  animation: plan-dock-in var(--dur) var(--ease);
 }
-.plan-tray-title {
-  margin: 0;
-  padding: 10px 12px;
-  font-size: 12.5px;
-  color: var(--ink-2);
-}
-.plan-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.plan-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 9px 12px;
-  border-top: 1px solid var(--line);
-}
-.plan-row.column {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 7px;
-}
-.plan-row-label {
-  margin: 0;
-  font-size: 12.5px;
-  color: var(--ink);
-}
-.plan-opts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.plan-opt {
-  border: 1px solid var(--line-strong);
-  background: transparent;
-  color: var(--ink-2);
-  font-size: 12px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  cursor: pointer;
-  transition: all var(--dur-fast) var(--ease);
-  font-family: var(--sans);
-}
-.plan-opt:hover {
-  color: var(--ink);
-  border-color: var(--ink-3);
-}
-.plan-opt.picked {
-  background: var(--btn-primary-bg);
-  box-shadow: var(--btn-primary-shadow);
-  border-color: transparent;
-  color: #fff;
-}
-.plan-style-body {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.plan-style-body b {
-  font-size: 12.5px;
-  color: var(--ink);
-}
-.plan-style-body small {
-  font-size: 11.5px;
-  color: var(--ink-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.tray-btn {
-  flex: none;
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--ink-2);
-  font-size: 12px;
-  padding: 4px 12px;
-  border-radius: var(--radius-s);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-family: var(--sans);
-  transition: all var(--dur-fast) var(--ease);
-}
-.tray-btn:hover:not(:disabled) {
-  color: var(--ink);
-  border-color: var(--ink-3);
-}
-.tray-btn.solid {
-  background: var(--btn-primary-bg);
-  box-shadow: var(--btn-primary-shadow);
-  border-color: transparent;
-  color: #fff;
-}
-.tray-btn.solid:hover:not(:disabled) {
-  filter: brightness(1.1);
-  border-color: transparent;
-  color: #fff;
-}
-.tray-btn.solid.done {
-  background: transparent;
-  color: var(--accent);
-}
-.tray-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.plan-tray-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 9px 12px;
-  border-top: 1px solid var(--line);
-}
-.plan-picked-note {
-  font-size: 11.5px;
-  color: var(--accent);
+@keyframes plan-dock-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 </style>
-

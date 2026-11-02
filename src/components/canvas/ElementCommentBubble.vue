@@ -14,7 +14,11 @@ const emit = defineEmits<{
 }>()
 
 const text = ref('')
-const inputRef = ref<HTMLTextAreaElement | null>(null)
+/**
+ * 用宿主 div 定位输入框：TextArea 的组件实例不保证暴露 DOM，
+ * 直接 querySelector 会在部分运行环境（如桌面 webview）报错。
+ */
+const rootRef = ref<HTMLElement | null>(null)
 
 // 点选后一键发送的常用指令
 const QUICK_CHIPS: Array<{ label: string; prompt: string }> = [
@@ -22,7 +26,7 @@ const QUICK_CHIPS: Array<{ label: string; prompt: string }> = [
   { label: '更紧凑', prompt: '让这个元素更紧凑：减小内边距与字号，保持可读性' },
   { label: '加圆角', prompt: '给这个元素加明显的圆角' },
   { label: '加阴影', prompt: '给这个元素加一层柔和投影，提升层次感' },
-  { label: '换强调色', prompt: '为这个元素换一个更合适的强调色，页面其余部分不动' },
+  { label: '换强调色', prompt: '为这个元素换一个更合适的强调色，设计稿其余部分不动' },
   { label: '整体换配色', prompt: '整体换一套更高级的配色方案，保持布局与内容不变' },
 ]
 
@@ -35,7 +39,7 @@ watch(
   () => {
     text.value = ''
     nextTick(() => {
-      inputRef.value?.querySelector('textarea')?.focus()
+      rootRef.value?.querySelector('textarea')?.focus()
     })
   },
   { immediate: true },
@@ -71,7 +75,7 @@ const bubbleStyle = computed(() => {
 </script>
 
 <template>
-  <div class="comment-bubble" :style="bubbleStyle" @pointerdown.stop @wheel.stop>
+  <div ref="rootRef" class="comment-bubble" :style="bubbleStyle" @pointerdown.stop @wheel.stop>
     <div class="target-chip">
       <code>{{ ctx.tag }}{{ ctx.classes.length ? '.' + ctx.classes.join('.') : '' }}</code>
       <span v-if="ctx.text" class="chip-text">{{ ctx.text }}</span>
@@ -82,7 +86,6 @@ const bubbleStyle = computed(() => {
       </button>
     </div>
     <TextArea
-      ref="inputRef"
       v-model:value="text"
       :auto-size="{ minRows: 2, maxRows: 5 }"
       placeholder="告诉 AI 这里要怎么改（Enter 发送）"

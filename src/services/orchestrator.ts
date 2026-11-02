@@ -1,8 +1,10 @@
 import { useCanvasStore } from '@/stores/canvas'
 import { useSettingsStore } from '@/stores/settings'
 import { useWorkspaceStore, type NewArtboardInput } from '@/stores/workspace'
-import type { Artboard, ChatAttachment, ElementContext, PlanPayload, PlanStyle, Version } from '@/types'
+import type { Artboard, ArtifactMode, ChatAttachment, ElementContext, PlanPayload, PlanStyle, Version } from '@/types'
+import { ARTIFACT_MODE_QUESTION_ID, artifactModePromptLabel, inferArtifactMode, makeArtifactModeQuestion, resolveArtifactMode } from '@/utils/artifactMode'
 import { applyEdits } from '@/utils/editable'
+import { branchPosition, branchTitle, captureRootOf, findFreeSpot, manualBranchTitle } from '@/utils/boardBranch'
 import { describeChanges } from '@/utils/diff'
 import { describeElement, generatePrototype } from './generator'
 import { isAgentProvider, streamAgent } from './llm'
@@ -55,30 +57,44 @@ function cascadePosition(): { x: number; y: number } {
 }
 
 /**
- * @description 把画板上待保存的手动修改落成一个新版本。检查器「保存」调用；AI 迭代前也会自动调用，
- * 因为 AI 总是基于当前版本源码修改，不先落盘的话手动修改会被 AI 结果覆盖丢失。
- * @param boardId - 画板 id
- * @returns 新版本；没有待保存修改时返回 null
+ * @description 把画板上待保存的手动修改落成一块新画板，放在源画板右侧；源画板保留原样。
+ * 检查器「保存」和画板头栏「保存」调用。
+ * @param boardId - 源画板 id
+ * @returns 新画板与新版本；没有待保存修改时返回 null
  */
-export async function commitManualEdits(boardId: string): Promise<Version | null> {
+export async function commitManualEdits(
+  boardId: string,
+): Promise<{ board: Artboard; version: Version } | null> {
   const ws = useWorkspaceStore()
   const cv = useCanvasStore()
   const edits = cv.edits[boardId]
-  const board = ws.findArtboard(boardId)
-  if (!board || !edits || !Object.keys(edits).length) return null
-  const current = ws.currentVersionOf(board)
+  const source = ws.findArtboard(boardId)
+  if (!source || !edits || !Object.keys(edits).length) return null
+  const current = ws.currentVersionOf(source)
   if (!current) throw new Error('画板还没有版本，无法保存手动修改')
   const count = Object.keys(edits).length
-  const version = await ws.addVersion(boardId, applyEdits(current.html, edits))
-  // 先落新版本再清修改：iframe 换成已含修改的新版本时不会闪回旧样式
-  cv.clearEdits(boardId)
+  const target = await ws.createArtboard({
+    title: manualBranchTitle(source.title, ws.artboards.map((b) => b.title)),
+    width: source.width,
+    height: source.height,
+    ...branchPosition(source, ws.artboards),
+    parent: source.id,
+    artifactMode: source.artifactMode,
+    capture: source.capture,
+  })
+  if (source.artifactMode) await ws.setArtifactMode(target.id, source.artifactMode)
+  const version = await ws.addVersion(target.id, applyEdits(current.html, edits))
+  cv.clearEdits(source.id)
+  cv.select(target.id)
+  cv.clearInspect()
+  cv.requestReveal([source.id, target.id])
   await ws.addMessage({
-    artboardId: boardId,
+    artboardId: target.id,
     role: 'assistant',
-    content: `已保存手动编辑（${count} 个元素）为 v${board.versions.length}`,
+    content: `已保存手动修改为新画板「${target.title}」（${count} 个元素）`,
     versionId: version.id,
   })
-  return version
+  return { board: target, version }
 }
 
 /** 工具栏「新建画板」：创建一块空白画板（之后可在聊天中向它生成） */
@@ -116,11 +132,18 @@ async function runGeneration(params: {
   displayPrompt?: string
   /** 随用户消息展示的参考图 / 资料 */
   attachments?: ChatAttachment[]
+  /** 产物类型；缺省沿用画板已有类型 */
+  artifactMode?: ArtifactMode
+  /** 新画板标题提示：迭代时用用户原话；缺省用源标题 · 改版 */
+  titleHint?: string
 }) {
   const ws = useWorkspaceStore()
   const cv = useCanvasStore()
   const st = useSettingsStore()
-  const { board, prompt, isNew, elementContext } = params
+  const { board, prompt, elementContext } = params
+  // 以画板实际版本为准，避免调用方传错 isNew 把已有设计稿整页重生成
+  const isNew = params.isNew && board.versions.length === 0
+  const artifactMode = params.artifactMode ?? board.artifactMode ?? 'page'
 
   cv.select(board.id)
   if (params.withUserMessage !== false) {
@@ -134,24 +157,52 @@ async function runGeneration(params: {
     })
   }
 
-  if (!isNew) await commitManualEdits(board.id)
-  cv.startGenerating(board.id)
+  // 迭代不再在同一块画板里堆版本：先在源画板右侧建一块新画板，流式内容直接画在新画板上。
+  const source = board
+  const target = isNew
+    ? board
+    : await ws.createArtboard({
+        title: branchTitle(source.title, ws.artboards.map((b) => b.title), params.titleHint ?? prompt),
+        width: source.width,
+        height: source.height,
+        ...branchPosition(source, ws.artboards),
+        parent: source.id,
+        artifactMode,
+        capture: source.capture,
+      })
+  // 首版生成前确定类型并落盘，画板徽章即时更新；迭代时保持不变
+  await ws.setArtifactMode(target.id, artifactMode)
+  if (!isNew) {
+    cv.select(target.id)
+    cv.clearInspect()
+    cv.requestReveal([source.id, target.id])
+  }
+  cv.startGenerating(target.id)
   const ac = new AbortController()
   activeControllers.add(ac)
+  let succeeded = false
 
   try {
+    // 迭代沿用源画板的对话上下文；新画板本身还没有消息
+    const contextBoardId = isNew ? target.id : source.id
     const recent = ws.messages
-      .filter((m) => m.artboardId === board.id && m.role === 'user')
+      .filter((m) => m.artboardId === contextBoardId && m.role === 'user')
       .slice(-4)
       .map((m) => ({ role: 'user' as const, content: m.content }))
 
-    const currentHtml = isNew
-      ? undefined
-      : (board.versions.find((v) => v.id === board.currentVersionId)?.html ?? undefined)
+    // 未保存的手动修改直接烘进本次生成的基线，生成成功后从源画板清掉
+    const current = isNew ? null : ws.currentVersionOf(source)
+    const edits = isNew ? null : cv.edits[source.id]
+    const currentHtml = current
+      ? edits && Object.keys(edits).length
+        ? applyEdits(current.html, edits)
+        : current.html
+      : undefined
 
     const result = await generatePrototype({
       provider: st.active,
       isNew,
+      artifactMode,
       styleId: params.styleOverride ? undefined : cv.designStyleId,
       styleOverride: params.styleOverride,
       reasoningEffort: cv.deepThink ? 'high' : undefined,
@@ -159,19 +210,23 @@ async function runGeneration(params: {
       currentHtml,
       elementContext,
       recent,
-      sizeHint: `${board.width}×${board.height}`,
+      sizeHint: `${target.width}×${target.height}`,
       signal: ac.signal,
-      onStreamingHtml: (h) => cv.setStreamingHtml(board.id, h),
+      onStreamingHtml: (h) => cv.setStreamingHtml(target.id, h),
     })
 
-    const version = await ws.addVersion(board.id, result.html)
-    const idx = board.versions.findIndex((v) => v.id === version.id)
+    const version = await ws.addVersion(target.id, result.html)
+    succeeded = true
+    if (!isNew) cv.clearEdits(source.id)
     const tail =
       result.mode === 'diff' ? '（增量）' : result.mode === 'fallback' ? '（回退全量）' : ''
+    const noun = artifactMode === 'component' ? '组件' : '原型'
     await ws.addMessage({
-      artboardId: board.id,
+      artboardId: target.id,
       role: 'assistant',
-      content: isNew ? `已生成原型 v${idx + 1}` : `已按反馈更新至 v${idx + 1}${tail}`,
+      content: isNew
+        ? `已生成${noun}`
+        : `已根据反馈生成新画板「${target.title}」${tail}`,
       versionId: version.id,
     })
   } catch (err) {
@@ -179,21 +234,19 @@ async function runGeneration(params: {
     const aborted = e.name === 'AbortError'
     if (!aborted) {
       retryAction = async () => {
-        const b = ws.findArtboard(board.id)
+        const b = ws.findArtboard(source.id)
         if (b) {
           await runGeneration({
+            ...params,
             board: b,
-            prompt,
-            isNew,
-            elementContext,
-            displayPrompt: params.displayPrompt,
-            attachments: params.attachments,
+            isNew: b.versions.length === 0,
+            withUserMessage: false,
           })
         }
       }
     }
     await ws.addMessage({
-      artboardId: board.id,
+      artboardId: isNew ? target.id : source.id,
       role: 'assistant',
       content: aborted ? '已停止生成。' : `生成失败：${e.message || '未知错误'}`,
       status: aborted ? 'aborted' : 'error',
@@ -201,7 +254,15 @@ async function runGeneration(params: {
     if (!aborted) console.error('[generation]', err)
   } finally {
     activeControllers.delete(ac)
-    cv.stopGenerating(board.id)
+    cv.stopGenerating(target.id)
+    // 迭代失败/中止：新画板还没有版本，撤掉，选中回到源画板
+    if (!isNew && !succeeded) {
+      const still = ws.findArtboard(target.id)
+      if (still && still.versions.length === 0) {
+        await ws.removeArtboard(target.id)
+        if (cv.selectedArtboardId === target.id) cv.select(source.id)
+      }
+    }
   }
 }
 
@@ -253,7 +314,13 @@ export async function sendPrompt(text: string, variantCount = 1, options: SendPr
         const ac = new AbortController()
         activeControllers.add(ac)
         try {
-          const currentHtml = b.versions.find((v) => v.id === b.currentVersionId)?.html ?? ''
+          const cur = ws.currentVersionOf(b)
+          const pending = cv.edits[b.id]
+          const currentHtml = cur
+            ? pending && Object.keys(pending).length
+              ? applyEdits(cur.html, pending)
+              : cur.html
+            : ''
           const plan = await planIteration({
             provider: st.active,
             prompt: trimmed,
@@ -283,6 +350,7 @@ export async function sendPrompt(text: string, variantCount = 1, options: SendPr
             elementContext: null,
             displayPrompt: displayText,
             attachments,
+            withUserMessage: false,
           })
         } finally {
           activeControllers.delete(ac)
@@ -339,16 +407,19 @@ export async function sendPrompt(text: string, variantCount = 1, options: SendPr
         await ws.addMessage({ artboardId: board.id, role: 'assistant', content: '已停止规划。', status: 'aborted' })
         return
       }
-      // 规划失败：回退为直接生成，不让用户卡在流程里
+      // 规划失败：能判断类型就直接生成；判断不了只让用户选类型，不静默猜 page
       console.warn('[plan] 规划失败，回退直接生成', err)
-      await runGeneration({
-        board,
-        prompt: trimmed,
-        isNew: true,
-        elementContext: null,
-        displayPrompt: displayText,
-        attachments,
-      })
+      const inferred = inferArtifactMode(trimmed)
+      if (inferred) {
+        await runGeneration({ board, prompt: trimmed, isNew: true, elementContext: null, artifactMode: inferred, withUserMessage: false })
+      } else {
+        await ws.addMessage({
+          artboardId: board.id,
+          role: 'assistant',
+          content: '先确认一下这次要生成什么，我再开始。',
+          plan: { questions: [makeArtifactModeQuestion()], styles: [], artifactMode: 'ambiguous' },
+        })
+      }
     } finally {
       activeControllers.delete(ac)
       cv.stopGenerating(board.id)
@@ -381,11 +452,20 @@ export async function sendPrompt(text: string, variantCount = 1, options: SendPr
   // 多方案方向来自 AI 规划（失败回退内置提示），并以信息卡形式展示在对话流
   let directions = VARIANT_HINT.slice(0, n - 1)
   let planCard: PlanPayload | null = null
+  let artifactMode: ArtifactMode = resolveArtifactMode({
+    boardMode: selected?.artifactMode,
+    fallback: inferArtifactMode(trimmed) ?? 'page',
+  })
   cv.startGenerating(first.id)
   const planAc = new AbortController()
   activeControllers.add(planAc)
   try {
     const plan = await planPrototype({ provider: st.active, prompt: trimmed, signal: planAc.signal })
+    artifactMode = resolveArtifactMode({
+      planMode: plan.artifactMode,
+      boardMode: selected?.artifactMode,
+      fallback: inferArtifactMode(trimmed) ?? 'page',
+    })
     if (plan.styles.length) {
       const chosen = plan.styles.slice(0, n)
       directions = chosen.map((s2) => `采用「${s2.name}」方向：\n${s2.directive}`)
@@ -410,6 +490,7 @@ export async function sendPrompt(text: string, variantCount = 1, options: SendPr
         prompt: i === 0 ? trimmed : `${trimmed}\n\n设计方向提示：${directions[i - 1] ?? VARIANT_HINT[i % VARIANT_HINT.length]}`,
         isNew: true,
         elementContext: null,
+        artifactMode,
         withUserMessage: i === 0,
         displayPrompt: i === 0 ? displayText : undefined,
         attachments: i === 0 ? attachments : undefined,
@@ -431,9 +512,9 @@ export async function sendPrompt(text: string, variantCount = 1, options: SendPr
 export async function startFromPlan(params: {
   boardId: string
   originalPrompt: string
+  plan: PlanPayload
   answers?: Record<string, string>
   style?: PlanStyle | null
-  items?: string[]
   /** 对话流展示文案（不含附件正文）；缺省显示完整提示词 */
   displayPrompt?: string
   /** 随用户消息展示的参考图 / 资料 */
@@ -444,13 +525,29 @@ export async function startFromPlan(params: {
   const board = ws.findArtboard(params.boardId)
   if (!board || cv.busy) return
 
-  const answerLines = Object.entries(params.answers ?? {})
-    .map(([q, a]) => `- ${q}：${a}`)
+  const isNew = board.versions.length === 0
+  // 迭代确认卡沿用画板类型；新画板按「用户答案 → 规划判断 → 画板既有类型」决定
+  const artifactMode: ArtifactMode = isNew
+    ? resolveArtifactMode({
+        answer: params.answers?.[ARTIFACT_MODE_QUESTION_ID],
+        planMode: params.plan.artifactMode,
+        boardMode: board.artifactMode,
+      })
+    : (board.artifactMode ?? 'page')
+
+  // 用问题原文做标签，比 qid 更能让模型理解答案含义
+  const answerLines = params.plan.questions
+    .map((q) => {
+      const a = params.answers?.[q.id]?.trim()
+      return a ? `- ${q.q}：${a}` : ''
+    })
+    .filter(Boolean)
     .join('\n')
   const enhanced = [
+    `【产物类型】${artifactModePromptLabel(artifactMode)}`,
     params.originalPrompt,
-    params.items?.length
-      ? `【执行项清单】\n${params.items.map((x, i) => `${i + 1}. ${x}`).join('\n')}`
+    params.plan.items?.length
+      ? `【执行项清单】\n${params.plan.items.map((x, i) => `${i + 1}. ${x}`).join('\n')}`
       : '',
     answerLines ? `【已确认的设计决策】\n${answerLines}` : '',
     params.style ? `【选定风格】\n${params.style.directive}` : '',
@@ -458,25 +555,31 @@ export async function startFromPlan(params: {
     .filter(Boolean)
     .join('\n\n')
 
+  await ws.setArtifactMode(board.id, artifactMode)
   await runGeneration({
     board,
     prompt: enhanced,
-    isNew: true,
+    isNew,
+    artifactMode,
     elementContext: null,
     styleOverride: params.style?.directive,
-    displayPrompt: params.displayPrompt,
-    attachments: params.attachments,
+    withUserMessage: false,
+    titleHint: params.originalPrompt,
   })
 }
 
 /** 规划卡「换一批」：AI 重新设计一组澄清问题与风格方案，原地替换托盘内容 */
-export async function replan(boardId: string, planMessageId: string, originalPrompt: string) {
+export async function replan(
+  boardId: string,
+  planMessageId: string,
+  originalPrompt: string,
+): Promise<PlanPayload | null> {
   const ws = useWorkspaceStore()
   const cv = useCanvasStore()
   const st = useSettingsStore()
   const board = ws.findArtboard(boardId)
   const msg = ws.messages.find((m) => m.id === planMessageId)
-  if (!board || !msg?.plan || cv.busy) return
+  if (!board || !msg?.plan || cv.busy) return null
 
   cv.startGenerating(board.id)
   const ac = new AbortController()
@@ -490,10 +593,12 @@ export async function replan(boardId: string, planMessageId: string, originalPro
     })
     cv.stopGenerating(board.id)
     await ws.updateMessage(planMessageId, { plan })
+    return plan
   } catch (err) {
     cv.stopGenerating(board.id)
     const aborted = (err as Error).name === 'AbortError'
     if (!aborted) console.warn('[replan] 换一批失败，保留原方案', err)
+    return null
   } finally {
     activeControllers.delete(ac)
   }
@@ -691,16 +796,7 @@ export async function sendLiveFeedback(
  * @returns 可放置的坐标
  */
 function freeSpot(x: number, y: number, w: number, h: number): { x: number; y: number } {
-  const GAP = 48
-  const boards = useWorkspaceStore().artboards
-  let top = y
-  for (;;) {
-    const hit = boards.find(
-      (b) => x < b.x + b.width + GAP && x + w + GAP > b.x && top < b.y + b.height + GAP && top + h + GAP > b.y,
-    )
-    if (!hit) return { x, y: top }
-    top = hit.y + hit.height + GAP
-  }
+  return findFreeSpot(x, y, w, h, useWorkspaceStore().artboards)
 }
 
 /**
@@ -726,6 +822,7 @@ export async function captureLiveBoard(
     height: board.height,
     ...freeSpot(board.x + board.width + 80, board.y, board.width, board.height),
     parent: board.id,
+    artifactMode: 'page',
     capture: {
       boardId: board.id,
       repoDir: live.type === 'repo' ? live.repoDir : undefined,
@@ -750,19 +847,23 @@ export async function captureLiveBoard(
 const MAX_REFERENCE_HTML = 40_000
 
 /**
- * @description 设计稿写回代码：先保存未保存的手动修改，再把「捕获基线 v1 → 当前版本」的改动清单
+ * @description 设计稿写回代码：先把手动修改存成新画板，再把「捕获基线 → 当前分支」的改动清单
  * 连同当前设计稿结构交给本机 Agent，在仓库里实现。
- * @param boardId - 设计稿画板（由实时仓库画板捕获而来）
+ * @param boardId - 设计稿画板（捕获画板本身，或由它迭代/手动保存出的分支）
  * @returns 没有可写回的改动时抛错，调用方提示用户
  */
 export async function writeBackToCode(boardId: string): Promise<void> {
   const ws = useWorkspaceStore()
   const board = ws.findArtboard(boardId)
-  const capture = board?.capture
-  if (!board || !capture?.repoDir) throw new Error('这块画板不是从代码仓库捕获的设计稿')
-  await commitManualEdits(boardId)
-  const base = board.versions[0]
-  const current = ws.currentVersionOf(board)
+  if (!board) throw new Error('画板不存在')
+  // 扁平分支可能让「写回代码」作用在子画板上；改动基线始终是最上层的捕获画板
+  const origin = captureRootOf(board, (id) => ws.findArtboard(id) ?? undefined)
+  const capture = origin?.capture
+  if (!origin || !capture?.repoDir) throw new Error('这块画板不是从代码仓库捕获的设计稿')
+  const saved = await commitManualEdits(boardId)
+  const currentBoard = saved?.board ?? board
+  const base = origin.versions[0]
+  const current = ws.currentVersionOf(currentBoard)
   const changes = base && current && base.id !== current.id ? describeChanges(base.html, current.html) : ''
   if (!changes) throw new Error('设计稿相对捕获时还没有改动')
   const doc = new DOMParser().parseFromString(current!.html, 'text/html')
@@ -779,9 +880,9 @@ export async function writeBackToCode(boardId: string): Promise<void> {
     '请把这些设计改动实现到项目源码中，保持现有组件结构与样式方案。',
   ].join('\n')
   await runCodeAgent({
-    boardId,
+    boardId: currentBoard.id,
     repoDir: capture.repoDir,
-    userText: `把设计稿 v${board.versions.findIndex((v) => v.id === current!.id) + 1} 的改动写回代码`,
+    userText: `把设计稿 v${currentBoard.versions.findIndex((v) => v.id === current!.id) + 1} 的改动写回代码`,
     prompt,
   })
 }

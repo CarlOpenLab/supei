@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch, watchEffect } from 'vue'
-import { message, Spin, Tooltip } from 'antdv-next'
-import type { Artboard, ElementContext, FrameTool, InspectMeta, WheelPayload } from '@/types'
+import { message, Spin } from 'antdv-next'
+import type { Artboard, ElementContext, InspectMeta, WheelPayload } from '@/types'
 import { useCanvasStore } from '@/stores/canvas'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useLiveStore } from '@/stores/live'
@@ -103,12 +103,6 @@ onBeforeUnmount(() => {
 const selected = computed(() => canvas.selectedArtboardId === board.value.id)
 const multiPicked = computed(() => canvas.multi.includes(board.value.id))
 
-/** 版本 hover 提示：各版本生成时间（格式与时间线一致，函数声明提升可前向引用） */
-const versionListTitle = computed(() =>
-  board.value.versions
-    .map((v, i) => `v${i + 1} · ${fmtVersionTime(v.createdAt)}`)
-    .join('\n'),
-)
 const streamingEntry = computed(() =>
   canvas.generating.find((g) => g.artboardId === board.value.id),
 )
@@ -121,7 +115,7 @@ const placeholderHtml = computed(() => {
   html,body{height:100%;margin:0}
   body{display:flex;align-items:center;justify-content:center;background:${bg};color:${ink};
     font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;letter-spacing:.5px}
-</style></head><body><div>空画板 — 在左侧聊天中描述你想要的页面</div></body></html>`
+</style></head><body><div>空画板 — 在左侧聊天中描述你想要的页面或组件</div></body></html>`
 })
 
 const displayHtml = computed(() => {
@@ -135,7 +129,7 @@ const lowZoom = computed(() => canvas.viewport.zoom < LOD_ZOOM)
 const thumbUrl = ref<string | null>(null)
 const thumbTried = ref('')
 const canThumb = computed(() => !isStreaming.value && !!board.value.currentVersionId)
-// 版本一变（切换 / AI 生成 / 保存手动修改）：缩略图失效，旧版本上的手动修改与检查选中都失效
+// 版本一变（AI 首版生成 / 新建分支）：缩略图失效，旧版本上的手动修改与检查选中都失效
 watch(
   () => board.value.currentVersionId,
   () => {
@@ -171,31 +165,13 @@ const showSkeleton = computed(
   () => isStreaming.value && !streamingEntry.value?.html,
 )
 
-// —— 版本导航 ——
-const versionIdx = computed(() => {
-  const list = board.value.versions
-  const i = list.findIndex((v) => v.id === board.value.currentVersionId)
-  return i >= 0 ? i + 1 : 0
-})
-const canPrev = computed(() => versionIdx.value > 1)
-const canNext = computed(() => versionIdx.value > 0 && versionIdx.value < board.value.versions.length)
-
 // —— 手动编辑：待保存修改 ——
 const pendingEdits = computed(() => canvas.editCount(board.value.id))
-
-/**
- * @description 切换版本前确认丢弃未保存的手动修改（修改按元素编号绑定在当前版本上，换版本即失效）。
- * @returns 可以继续切换时为 true
- */
-function confirmLeaveEdits(): boolean {
-  if (!pendingEdits.value) return true
-  return window.confirm(`有 ${pendingEdits.value} 个元素的手动修改尚未保存，切换版本会丢弃它们。继续？`)
-}
 
 async function saveEdits() {
   try {
     const v = await commitManualEdits(board.value.id)
-    if (v) message.success('手动修改已保存为新版本')
+    if (v) message.success('已保存为新画板')
   } catch (err) {
     message.error((err as Error).message)
   }
@@ -203,12 +179,6 @@ async function saveEdits() {
 
 function discardEdits() {
   canvas.clearEdits(board.value.id)
-}
-
-function stepVersion(dir: -1 | 1) {
-  const list = board.value.versions
-  const target = list[versionIdx.value - 1 + dir]
-  if (target && confirmLeaveEdits()) ws.setCurrentVersion(board.value.id, target.id)
 }
 
 // —— 头栏标题内联编辑 ——
@@ -399,14 +369,6 @@ function onFrameKey(payload: { key: string; ctrlKey: boolean; metaKey: boolean }
   emit('key-at-host', payload)
 }
 
-/**
- * @description 切换画板内工具；再次点击当前工具则关闭点选。
- * @param t - 要切换到的工具
- */
-function toggleTool(t: Exclude<FrameTool, null>) {
-  canvas.setTool(canvas.tool === t ? null : t)
-}
-
 // —— 节点菜单 ——
 const menuOpen = ref(false)
 const menuRef = ref<HTMLElement | null>(null)
@@ -419,8 +381,8 @@ function openMenuAt(cx: number, cy: number) {
   const W = 160
   const H = 210
   menuPos.value = {
-    x: Math.min(cx, window.innerWidth - W - 8),
-    y: Math.min(cy, window.innerHeight - H - 8),
+    x: Math.max(8, Math.min(cx, window.innerWidth - W - 8)),
+    y: Math.max(8, Math.min(cy, window.innerHeight - H - 8)),
   }
   confirmDelete.value = false
   menuOpen.value = true
@@ -455,50 +417,15 @@ function onContextMenu(e: MouseEvent) {
   openMenuAt(e.clientX, e.clientY)
 }
 
-// —— 版本历史时间线 ——
-const timelineOpen = ref(false)
-const timelineRef = ref<HTMLElement | null>(null)
-const timelinePos = ref({ x: 0, y: 0 })
-/** 各版本快照缩略图（与 LOD 共用缓存，同 key 命中即秒出） */
-const versionThumbs = ref<Array<string | null>>([])
-watch(timelineOpen, (open) => {
-  if (!open) return
-  const list = board.value.versions
-  versionThumbs.value = list.map(() => null)
-  list.forEach((v, i) => {
-    getThumb(v.id + ':' + v.html.length, v.html, board.value.width, board.value.height).then(
-      (u) => {
-        versionThumbs.value[i] = u
-      },
-    )
-  })
-})
-function toggleTimeline(e: MouseEvent) {
-  if (timelineOpen.value) {
-    timelineOpen.value = false
-    return
-  }
-  if (!board.value.versions.length) return
-  const W = 238
-  const H = Math.min(56 + board.value.versions.length * 40, 340)
-  timelinePos.value = {
-    x: Math.min(e.clientX, window.innerWidth - W - 8),
-    y: Math.min(e.clientY + 10, window.innerHeight - H - 8),
-  }
-  timelineOpen.value = true
-}
-function pickVersion(v: { id: string }) {
-  if (v.id !== board.value.currentVersionId && !confirmLeaveEdits()) return
-  ws.setCurrentVersion(board.value.id, v.id)
-  timelineOpen.value = false
-}
-function fmtVersionTime(ts: number): string {
-  const d = new Date(ts)
-  const now = new Date()
-  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  if (d.toDateString() === now.toDateString()) return hm
-  return `${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')} ${hm}`
-}
+// 画布底部工具栏的「画板菜单」：由 store 发起，对应画板在这里打开
+watch(
+  () => canvas.menuRequest,
+  (req) => {
+    if (!req || req.artboardId !== board.value.id) return
+    openMenuAt(req.x, req.y)
+    canvas.clearMenuRequest()
+  },
+)
 
 const compareVersionIds = computed(() => {
   const list = board.value.versions
@@ -512,12 +439,9 @@ function closeOnOutside(e: PointerEvent) {
     menuOpen.value = false
     confirmDelete.value = false
   }
-  if (timelineRef.value && !timelineRef.value.contains(e.target as Node)) {
-    timelineOpen.value = false
-  }
 }
-watch([menuOpen, timelineOpen], ([m, t]) => {
-  if (m || t) document.addEventListener('pointerdown', closeOnOutside, true)
+watch(menuOpen, (m) => {
+  if (m) document.addEventListener('pointerdown', closeOnOutside, true)
   else document.removeEventListener('pointerdown', closeOnOutside, true)
 })
 onBeforeUnmount(() => document.removeEventListener('pointerdown', closeOnOutside, true))
@@ -580,6 +504,7 @@ async function doDelete() {
     @contextmenu="onContextMenu"
   >
     <span v-if="badge" class="ab-badge">{{ badge }}</span>
+    <span v-if="board.artifactMode === 'component'" class="ab-mode-badge" title="这块画板是单个组件设计稿">组件</span>
     <header
       class="ab-header"
       :class="{ dragging }"
@@ -616,18 +541,6 @@ async function doDelete() {
           @keydown.stop
         />
       </template>
-      <span
-        v-else
-        class="ab-versions"
-        :title="versionListTitle"
-        @pointerdown.stop
-        @click.stop="toggleTimeline($event)"
-      >
-        <button class="nav" :disabled="!canPrev" title="上一版" @click.stop="stepVersion(-1)">‹</button>
-        <b>{{ versionIdx || '–' }}</b>
-        <i>/ {{ board.versions.length }}</i>
-        <button class="nav" :disabled="!canNext" title="下一版" @click.stop="stepVersion(1)">›</button>
-      </span>
 
       <span class="flex1" />
       <template v-if="isLive">
@@ -664,7 +577,7 @@ async function doDelete() {
       <span v-if="pendingEdits" class="ab-edits" @pointerdown.stop>
         {{ pendingEdits }} 处修改
         <button class="ab-edits-btn" title="放弃未保存的手动修改" @click.stop="discardEdits">放弃</button>
-        <button class="ab-edits-btn primary" title="保存为新版本" @click.stop="saveEdits">保存</button>
+        <button class="ab-edits-btn primary" title="保存为新画板" @click.stop="saveEdits">保存</button>
       </span>
       <Spin v-if="isStreaming" size="small" />
     </header>
@@ -739,25 +652,6 @@ async function doDelete() {
       <div v-if="isStreaming" class="stream-bar" />
     </div>
 
-    <!-- 底部居中悬浮工具条：点选反馈 / 手动编辑 / 画板菜单。
-         仅跟随当前画板：多块画板同时可见（如并排 / 并发生成）时不重复出现。 -->
-    <div v-if="selected" class="ab-toolbar" @pointerdown.stop @wheel.stop>
-      <Tooltip :title="canvas.tool === 'comment' ? '点选反馈已开启：点击页面元素，让 AI 定向修改' : '点选反馈：点击页面元素让 AI 定向修改'">
-        <button class="tool" :class="{ on: canvas.tool === 'comment' }" @click.stop="toggleTool('comment')">
-          <AppIcon name="cursor" :size="14" />
-        </button>
-      </Tooltip>
-      <Tooltip :title="canvas.tool === 'edit' ? '手动编辑已开启：点选元素在右侧调整，双击改字，Alt 悬停测距' : '手动编辑：像设计工具一样直接调整元素'">
-        <button class="tool" :class="{ on: canvas.tool === 'edit' }" @click.stop="toggleTool('edit')">
-          <AppIcon name="pencil" :size="13" />
-        </button>
-      </Tooltip>
-      <span class="ab-toolbar-sep" />
-      <button class="tool" title="画板菜单（右键画板同样打开）" @click.stop="openMenuAt($event.clientX, $event.clientY)">
-        <AppIcon name="dots" :size="14" />
-      </button>
-    </div>
-
     <ElementCommentBubble
       v-if="pendingCtx"
       :ctx="pendingCtx"
@@ -808,33 +702,6 @@ async function doDelete() {
         <button @click="confirmDelete = false">取消</button>
       </template>
     </div>
-
-    <div
-      v-if="timelineOpen"
-      ref="timelineRef"
-      class="ab-timeline"
-      :style="{ left: `${timelinePos.x}px`, top: `${timelinePos.y}px` }"
-      @pointerdown.stop
-      @contextmenu.prevent
-    >
-      <p class="tl-head">版本历史</p>
-      <button
-        v-for="(v, i) in board.versions"
-        :key="v.id"
-        class="tl-row"
-        :class="{ cur: v.id === board.currentVersionId }"
-        @click="pickVersion(v)"
-      >
-        <img v-if="versionThumbs[i]" class="tl-thumb" :src="versionThumbs[i]!" alt="" />
-        <span class="tl-ver" :class="{ on: v.id === board.currentVersionId }">v{{ i + 1 }}</span>
-        <span class="tl-time">{{ fmtVersionTime(v.createdAt) }}</span>
-        <span v-if="v.id === board.currentVersionId" class="tl-cur">当前</span>
-      </button>
-      <button v-if="compareVersionIds" class="tl-cmp" @click="compareOpen = true; timelineOpen = false">
-        <AppIcon name="copy" :size="11" />
-        对比上一版
-      </button>
-    </div>
   </Teleport>
 </template>
 
@@ -881,6 +748,22 @@ async function doDelete() {
   box-shadow: var(--btn-primary-shadow);
   color: #fff;
   letter-spacing: 0.06em;
+  pointer-events: none;
+}
+/* 组件画板徽章：左上角悬浮，不占头栏宽度 */
+.ab-mode-badge {
+  position: absolute;
+  top: -12px;
+  left: 10px;
+  z-index: 5;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--ink-2);
+  letter-spacing: 0.08em;
   pointer-events: none;
 }
 /* LOD 缩略图：盖住 iframe，iframe 保持挂载但不可见（省合成） */
@@ -942,42 +825,6 @@ async function doDelete() {
   background: var(--bg-raised);
   color: var(--ink);
 }
-.ab-versions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--ink-2);
-  font-family: var(--mono);
-}
-.ab-versions b {
-  color: var(--accent);
-  font-weight: 600;
-}
-.ab-versions i {
-  font-style: normal;
-  color: var(--ink-2);
-  opacity: 0.7;
-}
-button.nav {
-  border: none;
-  background: transparent;
-  font-size: 16px;
-  line-height: 1;
-  color: var(--ink-2);
-  cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 4px;
-  font-family: var(--mono);
-}
-button.nav:hover:not(:disabled) {
-  background: var(--hover);
-  color: var(--ink);
-}
-button.nav:disabled {
-  color: rgba(27, 27, 30, 0.2);
-  cursor: default;
-}
 .flex1 {
   flex: 1;
 }
@@ -1000,39 +847,6 @@ button.tool.on {
   /* 实心填充：工具选中态一眼可辨（对齐设计工具的激活样式） */
   background: var(--accent);
   color: #fff;
-}
-/* —— 底部居中悬浮工具条 —— */
-.ab-toolbar {
-  position: absolute;
-  left: 50%;
-  bottom: 10px;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px 5px;
-  border-radius: 10px;
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-card);
-  z-index: 6;
-  animation: toolbar-enter var(--dur-fast) var(--ease);
-}
-@keyframes toolbar-enter {
-  from {
-    opacity: 0;
-    transform: translate(-50%, 4px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-}
-.ab-toolbar-sep {
-  flex: none;
-  width: 1px;
-  height: 14px;
-  margin: 0 3px;
-  background: var(--line-strong);
 }
 /* —— 实时画板 —— */
 .live-dot {
@@ -1349,101 +1163,5 @@ button.tool.on {
   height: 1px;
   background: var(--line);
   margin: 4px 6px;
-}
-
-/* —— 版本历史时间线 —— */
-.ab-timeline {
-  position: fixed;
-  z-index: 1000;
-  width: 238px;
-  background: var(--glass-bg);
-  backdrop-filter: blur(10px);
-  border: none;
-  border-radius: 10px;
-  box-shadow: var(--shadow-popover);
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  animation: enter var(--dur-fast) var(--ease);
-}
-.tl-head {
-  margin: 0 0 4px;
-  padding: 0 6px;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-}
-.tl-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: none;
-  background: transparent;
-  padding: 5px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  text-align: left;
-  font-family: var(--sans);
-  transition: background var(--dur-fast) var(--ease);
-}
-.tl-row:hover {
-  background: var(--bg-raised);
-}
-.tl-thumb {
-  width: 46px;
-  height: 30px;
-  object-fit: cover;
-  object-position: top left;
-  border-radius: 4px;
-  background: #fff;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
-  flex: none;
-}
-.tl-ver {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-2);
-  padding: 1px 7px;
-  border-radius: 999px;
-  box-shadow: var(--btn-quiet-shadow);
-}
-.tl-ver.on {
-  color: #fff;
-  background: var(--btn-primary-bg);
-  box-shadow: var(--btn-primary-shadow);
-}
-.tl-time {
-  flex: 1;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-3);
-}
-.tl-cur {
-  font-size: 10.5px;
-  color: var(--accent);
-}
-.tl-cmp {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-  border: none;
-  background: transparent;
-  box-shadow: var(--btn-quiet-shadow);
-  color: var(--ink-2);
-  font-size: 12px;
-  padding: 5px 10px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-family: var(--sans);
-  transition: all var(--dur-fast) var(--ease);
-}
-.tl-cmp:hover {
-  color: var(--accent);
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.35);
 }
 </style>
