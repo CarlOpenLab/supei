@@ -10,19 +10,20 @@ The interface follows the [wonder.design](https://wonder.design) language: layer
 
 **Canvas**
 
-- Infinite canvas: damped Ctrl/⌘+wheel zoom anchored at the cursor, Space/middle-drag pan, marquee multi-select on empty space (Shift unions), arrow-key nudge (Shift = 10px), group drag with snap alignment & guides, fit-all
+- Infinite canvas: damped Ctrl/⌘+wheel zoom anchored at the cursor, hand tool in the bottom toolbar (left-drag anywhere, including over artboards), Space/middle-drag pan, marquee multi-select on empty space (Shift unions), arrow-key nudge (Shift = 10px), group drag with snap alignment & guides, fit-all
 - Artboards: drag by header (snap alignment), batch-delete multi-select, Ctrl+A select all, Ctrl+C/V copy & paste (versions included, cascading offsets), unified context menu (keyboard navigable)
 - Performance: low-zoom static snapshots (SVG foreignObject, cached in IndexedDB), offscreen iframes paused
 
-**Versions & Diff**
+**Flat Artboards & Diff**
 
-- Per-artboard version history: `‹ ›` stepping, click the version number for a timeline with thumbnails and timestamps
-- Version compare: side-by-side panes with three-level diff highlights (content edits purple / style changes amber / deletions red, attribute signatures and `<style>` sheet diff included), clickable stat chips filter categories
-- Variant compare: one click aligns same-parent variant boards in a row, dims the rest, and pins 方案 A/B/C badges
+- Figma-style flat boards: every AI iteration and every manual save creates a new board beside its source, and the source stays as-is; branches never overwrite each other
+- Board compare: one click aligns same-parent variant boards in a row, dims the rest, and pins 方案 A/B/C badges
+- Version compare is still available from a board menu when a board carries multiple versions (legacy projects); side-by-side panes with three-level diff highlights (content edits purple / style changes amber / deletions red, attribute signatures and `<style>` sheet diff included)
 
 **AI Collaboration**
 
-- v0-style plan card: clarifying questions + style direction + multi-variant generation, iterate after you pick
+- v0-style plan card: clarifying questions + style direction + multi-variant generation; every question also accepts a free-text answer
+- **Page / component modes**: the request decides whether to produce a full-page prototype or a single UI component, and the plan card lets you override it; components render as a state/variant specimen without page chrome
 - Aider-style **SEARCH/REPLACE incremental protocol**: only what you mention changes, everything else preserved verbatim, automatic full-regeneration fallback
 - Deep-thinking toggle: passes `reasoning_effort=high` (model permitting)
 - Parallel variants: 1–3 differentiated boards from one prompt
@@ -32,7 +33,7 @@ The interface follows the [wonder.design](https://wonder.design) language: layer
 
 - ✎ Edit tool: select an element, adjust font size / weight / line-height / letter-spacing / alignment / text color / background / size / radius / opacity / padding / margin in the inspector
 - Double-click to edit text in place (Enter commits, Esc reverts); hold Alt and hover other elements to measure spacing
-- Edits preview live in the artboard; **Save** lands them as a new version (diffable). Auto-saved before AI iterations so manual work is never overwritten
+- Edits preview live in the artboard; **Save** creates a new board beside the source with the changes baked in, so the original stays intact. Pending edits are carried into the next AI iteration so manual work is never lost
 
 **Live Repo Preview** (desktop)
 
@@ -107,8 +108,8 @@ API keys are stored only in local localStorage. Desktop requests leave through t
 ## Typical Workflow
 
 1. New project → describe what you want in the chat (or tap a preset prompt); AI streams v1 artboard(s);
-2. Turn on the ⌖ select tool, click a page element, give targeted feedback in the bubble (or quick commands); AI produces v2 via the incremental protocol;
-3. Click the version number for the timeline, `‹ ›` between versions, "Compare previous" for diff highlights;
+2. Turn on the ⌖ select tool, click a page element, give targeted feedback in the bubble (or quick commands); AI produces a new flat board to the right via the incremental protocol;
+3. Compare siblings with "方案对比", or open a board menu's "对比上一版" for diff highlights;
 4. "Export preview" produces the single-file interactive page for all artboards;
 5. Full shortcut list lives behind the in-app `?` help (17 entries).
 

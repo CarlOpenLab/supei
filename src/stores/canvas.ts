@@ -11,9 +11,11 @@ export const useCanvasStore = defineStore('canvas', {
     selectedArtboardId: null as string | null,
     /** 画板内点选工具：默认 comment（点选定向反馈），edit 为检查器手动编辑 */
     tool: 'comment' as FrameTool,
+    /** 抓手工具：按住左键拖动画布，优先于点选 / 编辑 */
+    handMode: false,
     /** 编辑模式下当前检查的元素（同一时刻只在一块画板上） */
     inspect: null as { artboardId: string; meta: InspectMeta } | null,
-    /** 待保存的手动修改：画板 id → dcId → 修改；保存时批量落成新版本 */
+    /** 待保存的手动修改：画板 id → dcId → 修改；保存时在右侧生成一块新画板 */
     edits: {} as Record<string, Record<string, ElementEdit>>,
     /** 正在生成的画板与流式 HTML（多方案并行时有多条） */
     generating: [] as Array<{ artboardId: string; html: string }>,
@@ -34,6 +36,10 @@ export const useCanvasStore = defineStore('canvas', {
     guides: { v: [] as number[], h: [] as number[] },
     /** 画板剪贴板（Ctrl+C/V）：存放画板快照，可重复粘贴 */
     clipboard: null as Artboard | null,
+    /** 底部工具栏「画板菜单」：请求对应画板在屏幕坐标处打开菜单 */
+    menuRequest: null as { artboardId: string; x: number; y: number } | null,
+    /** 平铺生成后：请求把源画板和新画板一起收进视口 */
+    revealRequest: null as { ids: string[]; seq: number } | null,
   }),
   getters: {
     /** 有 AI 任务在跑（生成原型或 Agent 改代码）：聊天发送与规划按钮据此禁用，停止按钮据此出现 */
@@ -112,7 +118,27 @@ export const useCanvasStore = defineStore('canvas', {
      */
     setTool(t: FrameTool) {
       this.tool = t
+      if (t) this.handMode = false
       if (t !== 'edit') this.inspect = null
+    },
+    /** 底部工具栏「抓手」：在拖动画布与点选 / 编辑之间互斥切换 */
+    toggleHand() {
+      this.handMode = !this.handMode
+      if (this.handMode) {
+        this.tool = null
+        this.inspect = null
+      }
+    },
+    /** 底部工具栏「画板菜单」：请求对应画板在屏幕坐标处打开菜单 */
+    requestMenu(artboardId: string, x: number, y: number) {
+      this.menuRequest = { artboardId, x, y }
+    },
+    clearMenuRequest() {
+      this.menuRequest = null
+    },
+    /** 请求画布把这几块画板一起收进视口（平铺生成后源画板与新画板并排可见） */
+    requestReveal(ids: string[]) {
+      this.revealRequest = { ids, seq: (this.revealRequest?.seq ?? 0) + 1 }
     },
     /**
      * @description 记录编辑模式下选中的元素；bridge 应用修改后的刷新上报只更新同一画板。

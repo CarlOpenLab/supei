@@ -126,7 +126,7 @@ async function createWebBoard() {
 /** 收集可导出/分享的画板（有版本的）；一块都没有时提示并返回 null */
 function collectExportable(verb: string) {
   const boards = ws.artboards.filter((b) => b.versions.length > 0)
-  if (!boards.length) message.warning(`还没有可${verb}的画板，先在左侧聊天里生成一个原型吧`)
+  if (!boards.length) message.warning(`还没有可${verb}的画板，先在左侧聊天里生成一个页面或组件吧`)
   return boards.length ? boards : null
 }
 
@@ -259,7 +259,7 @@ async function createBoard() {
         <div class="help-group">画布</div>
         <div class="help-row"><span>重置缩放 / 适配全部</span><span class="keys">0 / 1</span></div>
         <div class="help-row"><span>缩放（阻尼平滑）</span><span class="keys">Ctrl/⌘ + 滚轮</span></div>
-        <div class="help-row"><span>平移</span><span class="keys">Space + 拖拽 / 中键拖拽</span></div>
+        <div class="help-row"><span>平移</span><span class="keys">底部工具栏抓手 / Space + 拖拽 / 中键拖拽</span></div>
         <div class="help-row"><span>框选多选（Shift = 并集）</span><span class="keys">空白区左键拖拽</span></div>
         <div class="help-group">画板</div>
         <div class="help-row"><span>移动画板（吸附对齐）</span><span class="keys">拖拽画板头栏</span></div>
@@ -269,18 +269,18 @@ async function createBoard() {
         <div class="help-row"><span>创建副本</span><span class="keys">Ctrl/⌘ + D</span></div>
         <div class="help-row"><span>删除选中（含多选批量）</span><span class="keys">Del</span></div>
         <div class="help-row"><span>重命名画板</span><span class="keys">双击标题</span></div>
-        <div class="help-row"><span>画板菜单</span><span class="keys">右键画板 / ⋮</span></div>
-        <div class="help-row"><span>版本历史时间线</span><span class="keys">点击版本号</span></div>
+        <div class="help-row"><span>画板菜单</span><span class="keys">右键画板 / 底部工具栏 ⋮</span></div>
         <div class="help-row"><span>加入多选</span><span class="keys">Shift + 点击头栏</span></div>
         <div class="help-group">AI</div>
         <div class="help-row"><span>发送 / 停止生成</span><span class="keys">Enter / 停止按钮</span></div>
+        <div class="help-row"><span>迭代生成新画板</span><span class="keys">并排出现在源画板右侧</span></div>
         <div class="help-row"><span>定向反馈</span><span class="keys">⌖ 点选元素</span></div>
         <div class="help-group">手动编辑</div>
         <div class="help-row"><span>检查器调整样式</span><span class="keys">✎ 编辑工具 + 点选元素</span></div>
         <div class="help-row"><span>就地改字（Enter 完成 / Esc 撤销）</span><span class="keys">双击文字</span></div>
         <div class="help-row"><span>测量与其它元素的间距</span><span class="keys">选中后按住 Alt 悬停</span></div>
-        <div class="help-row"><span>保存为新版本（AI 迭代前自动保存）</span><span class="keys">画板头栏「保存」</span></div>
-        <div class="help-row"><span>取消 / 退出对比 / 清除选择</span><span class="keys">Esc</span></div>
+        <div class="help-row"><span>保存手动修改</span><span class="keys">在右侧生成新画板（头栏 / 检查器「保存」）</span></div>
+        <div class="help-row"><span>取消 / 退出抓手 / 退出对比 / 清除选择</span><span class="keys">Esc</span></div>
         <p class="help-note">提示：画板获得焦点时（点过画板内部），快捷键由 webview 内部转发，行为一致。</p>
       </div>
     </Modal>
@@ -345,7 +345,7 @@ async function createBoard() {
             <InputNumber v-model:value="customH" :min="200" :max="2400" />
           </label>
         </div>
-        <p class="hint">创建后在左侧聊天中输入需求即可在该画板上生成原型。</p>
+        <p class="hint">创建后在左侧聊天中输入需求即可在该画板上生成页面或组件。</p>
       </div>
     </Modal>
   </div>

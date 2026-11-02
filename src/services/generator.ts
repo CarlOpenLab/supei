@@ -1,4 +1,4 @@
-import type { ChatMessage, ElementContext, ProviderConfig } from '@/types'
+import type { ArtifactMode, ChatMessage, ElementContext, ProviderConfig } from '@/types'
 import { extractHtml, looksLikeCompleteHtml } from '@/utils/html'
 import { streamCompletion } from './llm'
 import { pluginRegistry } from '@/plugins/registry'
@@ -41,12 +41,48 @@ export const SYSTEM_PROMPT = `你是一位有强烈个人风格的资深 UI 设�
 - 圆角卡片 + 左侧彩色竖条的组合；到处毛玻璃；到处渐变。
 - 没有锚点的均质信息流；为凑数堆砌的图表、数字、图标。`
 
-const ADVISOR_PROMPT = `你是一位以打破常规著称的设计总监。根据用户的页面需求，现场设计一段「风格指令」——它将作为另一位设计师执行页面时的唯一风格约束。
+export const COMPONENT_SYSTEM_PROMPT = `你是一位有强烈个人风格的资深 UI 设计师兼前端工程师，正在产出「单个 UI 组件的视觉设计稿」。画板是展示台，不是网页视口：用户要看的是组件本身，以及需求中要求的状态、变体与尺寸，而不是一个塞进组件的页面。
+
+硬性输出要求：
+1. 只输出一个完整的 HTML5 文档（以 <!DOCTYPE html> 开头，以 </html> 结尾），不要任何解释说明，不要 markdown 代码围栏。
+2. <body> 只呈现组件规格展示：组件本体 + 必要的状态/变体标签。禁止导航栏、页脚、hero、营销区块、侧边栏、面包屑等页面框架；禁止把组件拼成一个应用页面或落地页。
+3. 所有 CSS 写在 <style> 中，所有 JS 写在 <script> 中；不引用任何外部 JS/CSS 库；可以引用 Google Fonts（仅字体），不要引用任何外部图片；图标用内联 SVG。
+4. 使用真实语义元素与真实交互态：button / a / input / select / textarea / dialog 等，配合 :hover、:active、:focus-visible、:disabled、[aria-busy="true"]；禁止用 div 伪装按钮。
+5. 使用真实、可信、具体的中文示例内容（按钮文案、表单标签、表格数据、人名），禁止 Lorem ipsum、「占位文本」、「点击了解更多」这类空洞填充。
+
+【展示台与构图】
+- 画板即展示台：中性底色（浅灰或纸色），组件表面与底色拉开层次，四周留出 ≥ 48px 呼吸空间；不依赖滚动。
+- 用户没有要求状态/变体时，只展示一个默认实例；要求了状态、变体或尺寸时，用「变体 × 状态」矩阵排布。
+- 每个实例旁放 11px 等宽 micro-label（如 DEFAULT / HOVER / FOCUS / DISABLED / LOADING、S / M / L），统一大小写与颜色，标签是注释，不抢组件本身。
+- 矩阵用 grid + gap 对齐，行距列距一致；同一行的实例尺寸一致（尺寸变体本身除外）。
+- 不要为了填满画板而添加用户没要求的组件、装饰卡片或说明段落。
+
+【组件级设计体系】写第一行 CSS 前先定好令牌并贯穿组件：
+- 颜色：surface / text / muted / border / primary / primary-hover / danger，先用 CSS 变量定义再使用。若给了风格指令，以风格指令的色值为准。
+- 尺寸：高度档位（如 32 / 40 / 48）、内边距、圆角、字号、图标尺寸各定 1-2 档，组件内部统一。
+- 状态：hover、active、focus-visible、disabled、loading 的差异要明确但克制（颜色、阴影、透明度、光标），过渡 150-200ms。
+- 层级靠字号、字重与颜色对比建立；组件内文字行高紧凑（1.2-1.4）。
+- 对比度：正文对底色 ≥ 4.5:1；焦点环必须清晰可见。
+- 焦点环用 box-shadow 或 outline 实现，不能只把 :focus-visible 轮廓去掉而不给替代。
+
+【细节】
+- 图标与文字基线、间距对齐；数字用等宽字体（ui-monospace）。
+- 背景可加极淡网格或柔和渐变增加层次，但不得干扰组件。
+- 阴影克制且方向一致；分隔优先用留白，其次细线，最后才色块。
+
+【禁止（AI 模板腔）】
+- 蓝紫渐变、#6366f1 紫色主色、emoji 当图标、Inter/Roboto 当标识字体。
+- 圆角卡片 + 左侧彩色竖条的组合；到处毛玻璃；到处渐变；无意义的阴影堆叠。
+- 把组件放回页面框架里「演示」；添加用户没要求的状态、区块或假数据。
+
+【交付边界】输出的是组件视觉设计稿（HTML），不是 Vue/React 源码：不要输出 .vue / .tsx、props 定义、安装说明或使用文档。若用户明确要「一组相关组件」（如按钮 + 输入框 + 下拉），按组件目录分组排布，每组独立，但不要拼成一个应用页面。`
+
+const ADVISOR_PROMPT = `你是一位以打破常规著称的设计总监。根据用户的设计需求（可能是整页原型，也可能是单个 UI 组件），现场设计一段「风格指令」——它将作为另一位设计师执行设计时的唯一风格约束。
 
 要求：
 1. 输出 5-7 条要点，每条一行，以 - 开头，第一行以【设计风格：你为它起的名字】开头。
 2. 必须具体到可直接执行：给出确切色值（hex）、字体栈、字号或间距的关键数字、构图手法、组件质感。
-3. 方向要独特而果断：避开最常见的蓝紫渐变、居中对称英雄区、均分卡片阵列。
+3. 方向要独特而果断：避开最常见的蓝紫渐变、居中对称英雄区、均分卡片阵列。若是单个组件，给组件级令牌（高度、内边距、圆角、描边、字重、hover / focus / disabled 态），不要写页面级构图。
 4. 最后一行以「- 禁止：」开头，列出 2-3 条该风格明确不允许出现的东西。
 5. 只输出风格指令本身，不要任何开场白或解释。`
 
@@ -63,11 +99,12 @@ function stripFences(text: string): string {
 /** AI 风格顾问：让模型根据需求现场设计一段风格指令。 */
 async function advisorStyle(opts: GenerateOptions): Promise<string> {
   if (!opts.provider) throw new Error('未配置模型：请到「设置 → 模型设置」选择服务商')
+  const isComponent = opts.artifactMode === 'component'
   let acc = ''
   for await (const delta of streamCompletion(opts.provider, {
     messages: [
       { role: 'system', content: ADVISOR_PROMPT },
-      { role: 'user', content: `页面需求：\n${opts.prompt}\n\n请为它现场设计风格指令。` },
+      { role: 'user', content: `${isComponent ? '组件' : '页面'}需求：\n${opts.prompt}\n\n请为它现场设计${isComponent ? '组件级' : '页面级'}风格指令。` },
     ],
     signal: opts.signal,
     temperature: 1,
@@ -95,6 +132,8 @@ export interface GenerateOptions {
   /** 未配置时 generatePrototype 直接抛错，由调用方提示 */
   provider: ProviderConfig | null
   isNew: boolean
+  /** 产物类型：整页原型或单个 UI 组件；缺省视为 page */
+  artifactMode?: ArtifactMode
   /** 设计风格预设 id（plugins registry）；'ai' 表示由 AI 现场生成风格指令 */
   styleId?: string
   /** 直接指定风格指令（来自 AI 规划卡的用户选择），优先于 styleId */
@@ -138,33 +177,66 @@ export function describeElement(ctx: ElementContext): string {
 }
 
 function buildFullUserContent(opts: GenerateOptions): string {
+  const isComponent = opts.artifactMode === 'component'
   if (opts.isNew) {
-    const size = opts.sizeHint ? `\n页面按 ${opts.sizeHint} 视口尺寸设计，内容需自适应。` : ''
-    return `请为以下需求设计一个网页原型：\n\n${opts.prompt}${size}`
+    const size = opts.sizeHint
+      ? isComponent
+        ? `\n画板按 ${opts.sizeHint} 尺寸设计；画板是组件展示台，组件本体尺寸由需求决定，不要求铺满。`
+        : `\n页面按 ${opts.sizeHint} 视口尺寸设计，内容需自适应。`
+      : ''
+    return isComponent
+      ? `请为以下需求设计一个单个 UI 组件的视觉设计稿（不是整页，不是 Vue/React 源码）：\n\n${opts.prompt}${size}`
+      : `请为以下需求设计一个网页原型：\n\n${opts.prompt}${size}`
   }
-  const parts = ['【当前页面 HTML】', opts.currentHtml ?? '', '', '【用户反馈】', opts.prompt]
+  const parts = [isComponent ? '【当前组件设计稿 HTML】' : '【当前页面 HTML】', opts.currentHtml ?? '', '', '【用户反馈】', opts.prompt]
   if (opts.elementContext) {
     parts.push(
       '',
-      '【反馈针对的元素】（用户在页面上选中了该元素，反馈主要针对它）',
+      '【反馈针对的元素】（用户在设计稿里选中了该元素，反馈主要针对它）',
       describeElement(opts.elementContext),
     )
   }
-  parts.push('', '请输出修改后的完整 HTML 文档。再次强调：未提及的部分逐字保持不变。')
+  parts.push(
+    '',
+    isComponent
+      ? '请输出修改后的完整 HTML 文档。再次强调：只调整组件本身，不要新增页面级区块，不要改动未要求的状态，未提及的部分逐字保持不变。'
+      : '请输出修改后的完整 HTML 文档。再次强调：未提及的部分逐字保持不变。',
+  )
   return parts.join('\n')
 }
 
 function buildDiffUserContent(opts: GenerateOptions): string {
-  const parts = ['【当前页面 HTML】', opts.currentHtml ?? '', '', '【用户反馈】', opts.prompt]
+  const isComponent = opts.artifactMode === 'component'
+  const parts = [isComponent ? '【当前组件设计稿 HTML】' : '【当前页面 HTML】', opts.currentHtml ?? '', '', '【用户反馈】', opts.prompt]
   if (opts.elementContext) {
     parts.push(
       '',
-      '【反馈针对的元素】（用户在页面上选中了该元素，反馈主要针对它）',
+      '【反馈针对的元素】（用户在设计稿里选中了该元素，反馈主要针对它）',
       describeElement(opts.elementContext),
     )
   }
-  parts.push('', '请按增量格式输出修改块。')
+  parts.push(
+    '',
+    isComponent ? '请按增量格式输出修改块；只改组件相关部分，不要新增页面级区块。' : '请按增量格式输出修改块。',
+  )
   return parts.join('\n')
+}
+
+/** 组件模式兜底：模型只给了 HTML 片段时，包成完整文档，保证预览/缩略图/导出可用。 */
+function ensureHtmlDocument(html: string): string {
+  if (/<html[\s>]/i.test(html) || /<!doctype/i.test(html)) return html
+  return [
+    '<!DOCTYPE html>',
+    '<html lang="zh-CN">',
+    '<head>',
+    '<meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    '</head>',
+    '<body>',
+    html,
+    '</body>',
+    '</html>',
+  ].join('\n')
 }
 
 /** 组装 system prompt：基础规范 + 风格段（预设指令或 AI 现场生成的指令） */
@@ -173,9 +245,17 @@ function systemPromptFor(
   withDiffProtocol = false,
   styleOverride = '',
 ): string {
+  const isComponent = opts.artifactMode === 'component'
   const style = styleOverride || pluginRegistry.stylePrompt(opts.styleId)
-  const parts = [SYSTEM_PROMPT]
-  if (style) parts.push(style)
+  const parts = [isComponent ? COMPONENT_SYSTEM_PROMPT : SYSTEM_PROMPT]
+  if (style) {
+    parts.push(style)
+    if (isComponent) {
+      parts.push(
+        '【范围提醒】以上风格指令中的「页面 / 全页」措辞，一律收缩到组件本身：只把配色、字体、圆角、描边与质感应用到这一个组件上，不要扩展成页面，不要新增页面级区块。',
+      )
+    }
+  }
   if (withDiffProtocol) parts.push(DIFF_PROTOCOL)
   return parts.join('\n\n')
 }
@@ -230,7 +310,7 @@ export function applySearchReplace(html: string, blocks: SearchReplaceBlock[]): 
     // 宽松匹配：按行 trim 对齐（模型常在行尾空格/缩进上有细微出入）
     const applied = applyLenientByLines(out, search, replace)
     if (!applied) {
-      throw new Error(`第 ${bi + 1} 个修改块的 SEARCH 内容在当前页面中找不到`)
+      throw new Error(`第 ${bi + 1} 个修改块的 SEARCH 内容在当前设计稿中找不到`)
     }
     out = applied
   }
@@ -316,7 +396,7 @@ export async function generatePrototype(opts: GenerateOptions): Promise<Generate
       )
       const blocks = parseSearchReplace(raw)
       if (blocks.length === 0) throw new Error('模型未输出修改块')
-      const html = applySearchReplace(opts.currentHtml ?? '', blocks)
+      const html = ensureHtmlDocument(applySearchReplace(opts.currentHtml ?? '', blocks))
       opts.onStreamingHtml(html)
       return { html, mode: 'diff' }
     } catch (err) {
@@ -332,7 +412,12 @@ export async function generatePrototype(opts: GenerateOptions): Promise<Generate
   for (const m of opts.recent ?? []) {
     messages.push({
       role: m.role,
-      content: m.role === 'assistant' ? '（已更新页面原型）' : m.content,
+      content:
+        m.role === 'assistant'
+          ? opts.artifactMode === 'component'
+            ? '（已更新组件设计稿）'
+            : '（已更新页面原型）'
+          : m.content,
     })
   }
   messages.push({ role: 'user', content: buildFullUserContent(opts) })
@@ -346,7 +431,8 @@ export async function generatePrototype(opts: GenerateOptions): Promise<Generate
     opts,
     true,
   )
-  const finalHtml = extractHtml(raw)
+  const extracted = extractHtml(raw)
+  const finalHtml = opts.artifactMode === 'component' ? ensureHtmlDocument(extracted) : extracted
   opts.onStreamingHtml(finalHtml)
   if (!finalHtml || !/<[a-z!]/i.test(finalHtml)) {
     throw new Error('模型没有输出有效的 HTML 内容，请重试或更换模型。')

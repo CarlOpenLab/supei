@@ -70,7 +70,7 @@ function fmtDate(ts: number): string {
         </div>
         <div class="hero-side">
           <p class="hero-desc">
-            聊天生成 HTML 原型，点选元素定向反馈，多方案并排对比。满意后一键导出，交给正式开发。
+            聊天生成 HTML 页面或 UI 组件，点选元素定向反馈，多方案并排对比。满意后一键导出，交给正式开发。
           </p>
           <div class="hero-cta">
             <button class="btn-primary" @click="createProject">

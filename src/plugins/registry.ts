@@ -198,6 +198,18 @@ const BUILTIN_PRESET_PLUGINS: DesignPlugin<PresetPluginData>[] = [
         '设计一个移动 App 的 3 步引导页（onboarding），渐变背景、插画占位、跳过与下一步按钮，375 宽移动端布局。',
     },
   },
+  {
+    id: 'preset:button-component',
+    kind: 'preset',
+    source: 'builtin',
+    name: '按钮组件规格',
+    enabled: true,
+    data: {
+      icon: 'frame',
+      prompt:
+        '设计一个按钮组件的视觉规格展示：这次只要「单个组件」，不是整页。用真实的 button 元素与真实交互态，展示 Default / Hover / Pressed / Focus / Disabled / Loading 六种状态，以及 S / M / L 三种尺寸；画板是组件展示台，不要页面框架与营销区块。',
+    },
+  },
 ]
 
 const BUILTIN_TEMPLATE_PLUGINS: DesignPlugin<TemplatePluginData>[] = [
