@@ -458,12 +458,21 @@ const bubbleStyles = {
 }
 </script>
 <template>
-  <aside class="chat-panel">
+    <aside v-show="canvas.chatDrawerOpen" class="chat-panel">
     <header class="chat-header">
       <span class="chat-title">设计对话</span>
       <span class="target-chip" :class="{ active: targetBoard }">
         {{ targetBoard ? targetBoard.title : '新画板' }}
       </span>
+      <button
+        type="button"
+        class="drawer-collapse"
+        title="收起对话抽屉（画布恢复全宽）"
+        aria-label="收起对话抽屉"
+        @click="canvas.chatDrawerOpen = false"
+      >
+        <AppIcon name="arrow-left" :size="13" />
+      </button>
     </header>
     <div ref="scrollRef" class="chat-scroll">
       <div v-if="!ws.messages.length" class="chat-empty">
@@ -736,13 +745,42 @@ const bubbleStyles = {
 </template>
 <style scoped>
 .chat-panel {
-  width: 344px;
-  flex: none;
+  /* 浮层抽屉：覆盖在画布左侧，不挤压画布；可从画布顶栏旁的入口重新展开 */
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 12px;
+  z-index: 30;
+  width: 400px;
   display: flex;
   flex-direction: column;
   background: var(--bg-panel);
   color: var(--ink);
   min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow-popover);
+  overflow: hidden;
+  animation: enter var(--dur) var(--ease);
+}
+.drawer-collapse {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.drawer-collapse:hover {
+  background: var(--hover);
+  color: var(--ink);
 }
 .chat-header {
   display: flex;
@@ -1518,10 +1556,27 @@ const bubbleStyles = {
 .style-select {
   display: none;
 }
-/* —— 待确认的计划直接停在输入框上方 —— */
+/* —— 待确认的计划：与输入卡连成一体的浮层，贴合 sender 上沿 —— */
 .plan-dock {
-  margin-bottom: 6px;
+  position: relative;
+  z-index: 0;
+  width: calc(100% - var(--composer-radius) * 2);
+  margin: 0 auto -1px;
+  border: 1px solid var(--tray-border);
+  border-bottom: none;
+  border-radius: 16px 16px 0 0;
+  background: var(--bg-elevated);
+  box-shadow: var(--tray-shadow);
+  backdrop-filter: blur(20px) saturate(1.3);
+  overflow: hidden;
   animation: plan-dock-in var(--dur) var(--ease);
+}
+/* 计划卡自身的卡片外壳交给托盘：内部内容平铺在托盘上 */
+.plan-dock :deep(.plan-card) {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
 }
 @keyframes plan-dock-in {
   from {

@@ -42,6 +42,8 @@ export const useCanvasStore = defineStore('canvas', {
     revealRequest: null as { ids: string[]; seq: number } | null,
     /** 点选反馈：当前选中的元素（格式化标签显示在输入卡，随下一次发送使用） */
     pendingCtx: null as ElementContext | null,
+    /** 聊天抽屉是否展开（浮层形式覆盖在画布左侧，可收起让画布全宽） */
+    chatDrawerOpen: true,
   }),
   getters: {
     /** 有 AI 任务在跑（生成原型或 Agent 改代码）：聊天发送与规划按钮据此禁用，停止按钮据此出现 */

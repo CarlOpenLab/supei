@@ -289,6 +289,16 @@ async function createBoard() {
 
     <div class="canvas-body">
       <ChatPanel />
+      <button
+        v-if="!canvas.chatDrawerOpen"
+        class="chat-drawer-open"
+        title="展开对话抽屉"
+        aria-label="展开对话抽屉"
+        @click="canvas.chatDrawerOpen = true"
+      >
+        <AppIcon name="send" :size="12" />
+        设计对话
+      </button>
       <div class="canvas-col">
         <InfiniteCanvas />
         <InspectorPanel />
@@ -450,10 +460,35 @@ async function createBoard() {
   flex: 1;
 }
 .canvas-body {
+  position: relative;
   flex: 1;
   display: flex;
   min-height: 0;
   animation: enter var(--dur-slow) var(--ease);
+}
+/* 抽屉收起后的重新展开入口：浮在画布左上角 */
+.chat-drawer-open {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 29;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-popover);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.chat-drawer-open:hover {
+  background: var(--bg-raised);
 }
 .canvas-col {
   flex: 1;
