@@ -4,7 +4,7 @@
 
 Supei 是一块与 AI 协作的无限画布：聊天生成、流式预览、点选元素定向反馈、多方案并排对比。整体效果敲定后一键导出单文件交互式预览页或各画板 HTML，交给正式开发——把「设计长什么样」从 AI 编码流程里拆出来，先讨论、后实现。
 
-界面语言对齐 [wonder.design](https://wonder.design)：中性近黑分层、Inter / Uncut Sans / JetBrains Mono 三字体体系、紫色高光主按钮、发丝级描边、毛玻璃浮层。AI 侧内置一套蒸馏自专业设计方法论的设计规范（设计令牌先行、字号阶梯、克制配色、非对称构图、CJK 排版纪律、反 AI 模板腔清单），并附带 9 个内置设计风格（**自动 / 编辑杂志风 / 深色科技 / 瑞士国际主义 / 温和亲和 / 新粗野主义 / 侘寂极简 / Linear 深色 SaaS / 包豪斯构成**）——生成与增量迭代都会以所选风格强约束产出。
+界面语言对齐 [wonder.design](https://wonder.design)：中性近黑分层、Inter / Uncut Sans / JetBrains Mono 三字体体系、蓝色高光主按钮、发丝级描边、毛玻璃浮层，支持暗黑 / 白天主题切换并持久化。AI 侧内置一套蒸馏自专业设计方法论的设计规范（设计令牌先行、字号阶梯、克制配色、非对称构图、CJK 排版纪律、反 AI 模板腔清单），并附带 9 个内置设计风格（**自动 / 编辑杂志风 / 深色科技 / 瑞士国际主义 / 温和亲和 / 新粗野主义 / 侘寂极简 / Linear 深色 SaaS / 包豪斯构成**）——生成与增量迭代都会以所选风格强约束产出。
 
 ## 核心能力
 
@@ -23,6 +23,7 @@ Supei 是一块与 AI 协作的无限画布：聊天生成、流式预览、点�
 **AI 协作**
 
 - v0 式对话流：AI 规划卡（澄清问题 + 风格方案 + 多方向并排生成）、迭代意图确认；每个问题都可自由输入自定义答案
+- **参考图 / 资料附件**：输入卡支持选取、拖入、粘贴图片与文本资料（md / txt / csv / 代码等），图片以缩略图随消息展示，文本正文自动拼入提示词作为生成上下文
 - **页面 / 组件双模式**：按需求自动判断产出整页原型还是单个 UI 组件，规划卡可改选类型；组件以状态 / 变体规格展示稿输出，不生成页面框架
 - Aider 风格 **SEARCH/REPLACE 增量协议**：只改你指的地方，未提及部分逐字保留，失败自动回退全量
 - 深度思考开关：透传 `reasoning_effort=high`（部分模型支持）
@@ -91,17 +92,18 @@ npm install
 npm run dev        # http://localhost:5188
 ```
 
-首次使用默认处于「内置演示模式」（不调用网络，输出样例原型，用于体验完整流程）。
+首次使用需先配置模型：输入区的模型选择器会引导你打开「设置 → 模型设置」。
 
 ## 接入真实模型
 
-顶栏「设置」→ 模型设置 → **+ 添加服务商**，任意 OpenAI 兼容接口均可：
+顶栏「设置」→ 模型设置 → **+ 添加服务商**，任意 OpenAI 兼容接口均可；设置弹窗内置预设可一键快速添加：
 
 | 服务商 | Base URL | 模型示例 |
 | --- | --- | --- |
 | 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | `glm-4.7` |
 | DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o` |
+| Magpie 网关（本机） | `http://127.0.0.1:3425/v1` | 从网关自动拉取模型列表 |
 
 API Key 仅保存在本机 localStorage。桌面端请求经 Go 代理发出（无 CORS 限制）；浏览器直连时若服务商不允许跨域，换用支持的服务商即可。配置错误（地址/Key 无效）会得到明确的错误卡与一键重试，不会卡死。
 
@@ -115,7 +117,7 @@ API Key 仅保存在本机 localStorage。桌面端请求经 Go 代理发出（�
 
 ## 技术栈
 
-Vue 3 + TypeScript + Vite + Pinia + vue-router；UI 基座 antdv-next，AI 聊天组件 @antdv-next/x（Bubble/Sender）；持久化 IndexedDB（画板数据 + 缩略图缓存双库）；LLM 双路径——桌面 Go 代理 / 浏览器 fetch 直连的 OpenAI 兼容 SSE，运行时自动探测降级。
+Vue 3 + TypeScript + Vite + Pinia + vue-router；UI 基座 antdv-next，AI 聊天组件 @antdv-next/x（Bubble）；持久化 IndexedDB（画板数据 + 缩略图缓存双库）；LLM 双路径——桌面 Go 代理 / 浏览器 fetch 直连的 OpenAI 兼容 SSE，运行时自动探测降级。
 
 原型画板为沙箱 iframe 渲染的自包含 HTML；点选功能通过注入 iframe 的 bridge 脚本实现（hover 高亮、点击拦截、Ctrl+滚轮缩放与键盘事件转发）。迭代采用 Aider 风格增量协议：模型只输出 `<<<<<<< SEARCH / ======= / >>>>>>> REPLACE` 修改块，应用时先精确匹配再按行 trim 宽松匹配，任一块失败自动回退全量重生成。
 

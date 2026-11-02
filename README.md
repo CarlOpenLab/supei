@@ -4,7 +4,7 @@ English | [简体中文](README_ZH.md)
 
 **Supei** is an infinite-canvas AI design tool. Chat to generate HTML prototypes with live streaming preview, click any element for targeted feedback, compare variants side by side, and export a single-file interactive preview when the design settles — pulling "what should it look like" out of the AI coding loop: discuss first, implement later.
 
-The interface follows the [wonder.design](https://wonder.design) language: layered near-black surfaces, Inter / Uncut Sans / JetBrains Mono, purple accent buttons, hairline strokes, frosted-glass overlays. The AI side ships a distilled design methodology (tokens first, type scale, restrained palettes, asymmetric composition, CJK typesetting discipline, an anti-AI-template checklist) plus **9 built-in design styles** — **Auto / Editorial Magazine / Dark Tech / Swiss International / Warm & Friendly / Neo-Brutalism / Wabi-Sabi Minimal / Linear Dark SaaS / Bauhaus Composition** — hard constraints applied to both full generation and incremental iteration.
+The interface follows the [wonder.design](https://wonder.design) language: layered near-black surfaces, Inter / Uncut Sans / JetBrains Mono, blue accent buttons, hairline strokes, frosted-glass overlays, and a persistent dark / light theme toggle. The AI side ships a distilled design methodology (tokens first, type scale, restrained palettes, asymmetric composition, CJK typesetting discipline, an anti-AI-template checklist) plus **9 built-in design styles** — **Auto / Editorial Magazine / Dark Tech / Swiss International / Warm & Friendly / Neo-Brutalism / Wabi-Sabi Minimal / Linear Dark SaaS / Bauhaus Composition** — hard constraints applied to both full generation and incremental iteration.
 
 ## Highlights
 
@@ -23,6 +23,7 @@ The interface follows the [wonder.design](https://wonder.design) language: layer
 **AI Collaboration**
 
 - v0-style plan card: clarifying questions + style direction + multi-variant generation; every question also accepts a free-text answer
+- **Reference attachments**: the composer accepts picked, dragged, or pasted images and text files (md / txt / csv / code); images show as thumbnails on the message, and text content is folded into the prompt as generation context
 - **Page / component modes**: the request decides whether to produce a full-page prototype or a single UI component, and the plan card lets you override it; components render as a state/variant specimen without page chrome
 - Aider-style **SEARCH/REPLACE incremental protocol**: only what you mention changes, everything else preserved verbatim, automatic full-regeneration fallback
 - Deep-thinking toggle: passes `reasoning_effort=high` (model permitting)
@@ -91,17 +92,18 @@ npm install
 npm run dev        # http://localhost:5188
 ```
 
-First run starts in **built-in demo mode** (no network calls, sample prototypes) so you can experience the full flow.
+First run asks for a model: the model picker in the composer guides you to Settings → Model providers.
 
 ## Connecting Real Models
 
-Top bar → Settings → Model providers → **+ Add provider**. Any OpenAI-compatible endpoint works:
+Top bar → Settings → Model providers → **+ Add provider**. Any OpenAI-compatible endpoint works; the settings dialog ships quick presets:
 
 | Provider | Base URL | Example model |
 | --- | --- | --- |
 | Zhipu GLM | `https://open.bigmodel.cn/api/paas/v4` | `glm-4.7` |
 | DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o` |
+| Magpie gateway (local) | `http://127.0.0.1:3425/v1` | fetched from the gateway |
 
 API keys are stored only in local localStorage. Desktop requests leave through the Go proxy (no CORS limits); in the browser, pick a provider that allows cross-origin calls. Bad configs get a clear error card with one-click retry instead of a hang.
 
@@ -115,7 +117,7 @@ API keys are stored only in local localStorage. Desktop requests leave through t
 
 ## Tech Stack
 
-Vue 3 + TypeScript + Vite + Pinia + vue-router; antdv-next as the UI base, @antdv-next/x (Bubble/Sender) for the AI chat; IndexedDB persistence (artboard data + thumbnail cache); dual LLM path — desktop Go proxy / browser direct fetch against OpenAI-compatible SSE with runtime auto-detection.
+Vue 3 + TypeScript + Vite + Pinia + vue-router; antdv-next as the UI base, @antdv-next/x (Bubble) for the AI chat; IndexedDB persistence (artboard data + thumbnail cache); dual LLM path — desktop Go proxy / browser direct fetch against OpenAI-compatible SSE with runtime auto-detection.
 
 Prototype artboards are self-contained HTML rendered in sandboxed iframes; selection works through a bridge script injected into the iframe (hover highlight, click interception, Ctrl+wheel zoom & keyboard forwarding). Iteration uses the Aider-style incremental protocol: the model outputs `<<<<<<< SEARCH / ======= / >>>>>>> REPLACE` blocks, matched exactly first then line-trimmed loosely, with automatic full regeneration fallback when any block fails.
 
