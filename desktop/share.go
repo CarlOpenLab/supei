@@ -32,6 +32,12 @@ type ShareService struct{}
 
 const preferredSharePort = 7788
 
+// shareCSP constrains published previews: inline scripts/styles only, no
+// network exfil channels (fetch/XHR/WebSocket), fonts/images via https:data.
+const shareCSP = `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https:; ` +
+	`font-src https: data:; img-src http: https: data: blob:; media-src http: https: data: blob:; ` +
+	`connect-src 'none'; object-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'`
+
 var (
 	shareIDRe = regexp.MustCompile(`^[a-f0-9]{16}$`)
 	shareMu   sync.Mutex
@@ -78,8 +84,14 @@ func ensureShareServer() (int, error) {
 			http.Error(w, "分享已撤销或不存在", http.StatusNotFound)
 			return
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
+		// 分享内容是 AI 生成 / 网页捕获的 HTML，对查看者的浏览器而言不可信：
+		// 关死数据外呼通道（fetch/XHR/WebSocket），脚本与样式只允许内联。
+		h := w.Header()
+		h.Set("Content-Security-Policy", shareCSP)
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Content-Type", "text/html; charset=utf-8")
+		h.Set("Cache-Control", "no-store")
 		w.Write(b)
 	})
 	go http.Serve(ln, mux)

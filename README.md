@@ -23,6 +23,8 @@ The interface follows the [wonder.design](https://wonder.design) language: layer
 **AI Collaboration**
 
 - v0-style plan card: clarifying questions + style direction + multi-variant generation; every question also accepts a free-text answer
+- **Project-level brand contract**: palette → `--brand-*` CSS variables, display/body fonts, radius & spacing base, custom hard rules; once enabled, every generation in the project (new board / incremental iteration / coding agent) must comply, keeping styles consistent across boards — export a literal `tokens.css` anytime
+- **Post-generation critique**: before hand-off the model self-audits the draft against hard criteria (authentic content, AI-template tells, hierarchy, contract compliance); findings land as a diagnostic card in the chat (toggle in settings)
 - **Reference attachments**: the composer accepts picked, dragged, or pasted images and text files (md / txt / csv / code); images show as thumbnails on the message, and text content is folded into the prompt as generation context
 - **Page / component modes**: the request decides whether to produce a full-page prototype or a single UI component, and the plan card lets you override it; components render as a state/variant specimen without page chrome
 - Aider-style **SEARCH/REPLACE incremental protocol**: only what you mention changes, everything else preserved verbatim, automatic full-regeneration fallback
@@ -119,7 +121,7 @@ API keys are stored only in local localStorage. Desktop requests leave through t
 
 Vue 3 + TypeScript + Vite + Pinia + vue-router; antdv-next as the UI base, @antdv-next/x (Bubble) for the AI chat; IndexedDB persistence (artboard data + thumbnail cache); dual LLM path — desktop Go proxy / browser direct fetch against OpenAI-compatible SSE with runtime auto-detection.
 
-Prototype artboards are self-contained HTML rendered in sandboxed iframes; selection works through a bridge script injected into the iframe (hover highlight, click interception, Ctrl+wheel zoom & keyboard forwarding). Iteration uses the Aider-style incremental protocol: the model outputs `<<<<<<< SEARCH / ======= / >>>>>>> REPLACE` blocks, matched exactly first then line-trimmed loosely, with automatic full regeneration fallback when any block fails.
+Prototype artboards are self-contained HTML rendered in sandboxed iframes (sandbox is `allow-scripts` only, no same-origin; an injected CSP meta shuts down every exfil channel — fetch/XHR/WebSocket — allowing only inline scripts/styles, Google Fonts, and http/https images); selection works through a bridge script injected into the iframe (hover highlight, click interception, Ctrl+wheel zoom & keyboard forwarding). The exported single-file viewer and the LAN share page enforce the same CSP policy. Iteration uses the Aider-style incremental protocol: the model outputs `<<<<<<< SEARCH / ======= / >>>>>>> REPLACE` blocks, matched exactly first then line-trimmed loosely, with automatic full regeneration fallback when any block fails.
 
 The AI-side design system and built-in styles live in `src/plugins/registry.ts` (pluggable registry) and the `SYSTEM_PROMPT` in `src/services/generator.ts`; the end-to-end acceptance script is `scripts/e2e-final.mjs`.
 

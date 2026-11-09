@@ -151,6 +151,8 @@ func (DevServerService) Start(ctx context.Context, opts DevStartOptions, out *my
 	}()
 	scanner := bufio.NewScanner(pr)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	started := time.Now()
+	stallHinted := false
 	for scanner.Scan() {
 		line := ansiRe.ReplaceAllString(scanner.Text(), "")
 		if err := out.Send(DevEvent{Type: "log", Text: line}); err != nil {
@@ -167,6 +169,12 @@ func (DevServerService) Start(ctx context.Context, opts DevStartOptions, out *my
 			}
 			stopProxy = stop
 			if err := out.Send(DevEvent{Type: "ready", URL: proxyOrigin + target.RequestURI(), Target: found}); err != nil {
+				return err
+			}
+		} else if !stallHinted && time.Since(started) > 90*time.Second {
+			// 就绪探测靠输出里的本地 URL；部分框架不打印，提前给用户可解释的提示
+			stallHinted = true
+			if err := out.Send(DevEvent{Type: "log", Text: "已等待 90 秒仍未在输出中检测到本地地址；若页面一直未就绪，请确认 dev 脚本会打印 localhost URL（或给脚本加 --port）"}); err != nil {
 				return err
 			}
 		}
@@ -189,12 +197,13 @@ func (DevServerService) Proxy(ctx context.Context, target string, bridgeScript s
 		return fmt.Errorf("无效的网址：%s", target)
 	}
 	// 先跟随重定向拿到最终地址（如 example.com → www.example.com），
-	// 否则跨域跳转会让 iframe 绕过代理、丢失注入脚本
+	// 否则跨域跳转会让 iframe 绕过代理、丢失注入脚本。
+	// 用短超时 client：目标站无响应时尽快报错，而不是拖住整个会话。
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	if err != nil {
 		return fmt.Errorf("无法访问 %s：%w", u.String(), err)
 	}

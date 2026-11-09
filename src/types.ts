@@ -3,6 +3,32 @@ export interface Project {
   name: string
   createdAt: number
   updatedAt: number
+  /** 项目级品牌契约（DESIGN.md 思路的 token 化）；缺失 = 未启用 */
+  brandContract?: BrandContract
+}
+
+/** 项目级品牌契约：项目内所有生成（原型新建 / 增量迭代 / Agent 改代码）共用的一致性约束 */
+export interface BrandPalette {
+  /** CSS 变量片段（不含 --brand- 前缀），如 primary、bg */
+  token: string
+  color: string
+}
+
+export interface BrandContract {
+  /** 一句话品牌气质（如「克制、纸感、像老派杂志」），拼入生成提示词 */
+  voice: string
+  /** 核心调色板 → --brand-<token> 变量 */
+  palette: BrandPalette[]
+  /** 标题字体（Google Fonts 字族名或字体栈，空 = 不约束） */
+  fontDisplay: string
+  /** 正文字体 */
+  fontBody: string
+  /** 统一圆角（如 12px，空 = 不约束） */
+  radius: string
+  /** 间距基准（如 8px，生成时取其整数倍） */
+  spacing: string
+  /** 追加的自由硬规则（禁止项、符号用法等） */
+  rules: string
 }
 
 export interface Version {

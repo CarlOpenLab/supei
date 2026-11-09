@@ -12,6 +12,7 @@ import type { RepoInfo } from '@/services/mygo-client'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
 import InfiniteCanvas from '@/components/canvas/InfiniteCanvas.vue'
 import InspectorPanel from '@/components/canvas/InspectorPanel.vue'
+import BrandContractModal from '@/components/project/BrandContractModal.vue'
 import SettingsModal from '@/components/settings/SettingsModal.vue'
 import ShareModal from '@/components/share/ShareModal.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
@@ -29,6 +30,7 @@ const settings = useSettingsStore()
 const settingsOpen = ref(false)
 const newBoardOpen = ref(false)
 const helpOpen = ref(false)
+const contractOpen = ref(false)
 
 const SIZE_PRESETS = [
   ...pluginRegistry.listByKind('template').map((t) => {
@@ -230,6 +232,13 @@ async function createBoard() {
       </span>
       <span class="flex1" />
       <span class="provider-chip">{{ providerLabel }}</span>
+      <button
+        class="bar-btn"
+        :title="ws.currentProject?.brandContract ? '品牌契约已启用：生成时强制遵守（点击编辑）' : '品牌契约：项目级设计 token，生成时强制遵守'"
+        @click="contractOpen = true"
+      >
+        <AppIcon name="palette" :size="13" /> 契约
+      </button>
       <button class="bar-btn" title="全部画板导出为单文件交互式预览页" @click="exportProjectViewer">
         <AppIcon name="share" :size="13" /> 导出预览
       </button>
@@ -307,6 +316,7 @@ async function createBoard() {
 
     <SettingsModal v-model:open="settingsOpen" />
     <ShareModal />
+    <BrandContractModal v-model:open="contractOpen" />
 
     <Modal :open="!!repoInfo" title="打开代码仓库" ok-text="启动预览" @ok="createRepoBoard" @cancel="repoInfo = null">
       <div v-if="repoInfo" class="board-form">

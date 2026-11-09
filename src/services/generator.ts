@@ -1,5 +1,6 @@
 import type { ArtifactMode, ChatMessage, ElementContext, ProviderConfig } from '@/types'
 import { extractHtml, looksLikeCompleteHtml } from '@/utils/html'
+import { applySearchReplace, parseSearchReplace } from '../utils/searchReplace'
 import { streamCompletion } from './llm'
 import { pluginRegistry } from '@/plugins/registry'
 
@@ -138,6 +139,8 @@ export interface GenerateOptions {
   styleId?: string
   /** 直接指定风格指令（来自 AI 规划卡的用户选择），优先于 styleId */
   styleOverride?: string
+  /** 品牌契约提示词段（调用方由项目契约渲染）；缺失 = 项目未启用契约 */
+  brandContract?: string
   /** 思考档位（深度思考开关），透传给支持的服务商 */
   reasoningEffort?: string
   prompt: string
@@ -156,10 +159,12 @@ export interface GenerateResult {
   mode: 'diff' | 'full' | 'fallback'
 }
 
-export interface SearchReplaceBlock {
-  search: string
-  replace: string
-}
+/* SEARCH/REPLACE 协议的解析与应用已抽到 src/utils/searchReplace.ts（保持对外 re-export） */
+export {
+  parseSearchReplace,
+  applySearchReplace,
+  type SearchReplaceBlock,
+} from '../utils/searchReplace'
 
 /**
  * @description 把点选元素描述成提示词片段（选择器、标签、文本、HTML 片段），生成与 Agent 改代码共用。
@@ -256,86 +261,12 @@ function systemPromptFor(
       )
     }
   }
+  if (opts.brandContract) parts.push(opts.brandContract)
   if (withDiffProtocol) parts.push(DIFF_PROTOCOL)
   return parts.join('\n\n')
 }
 
-/** 从模型输出解析 SEARCH/REPLACE 块（容忍代码围栏与超长的分隔标记行）。 */
-export function parseSearchReplace(raw: string): SearchReplaceBlock[] {
-  let s = raw.trim()
-  if (s.startsWith('```')) {
-    const nl = s.indexOf('\n')
-    s = nl >= 0 ? s.slice(nl + 1) : ''
-  }
-  s = s.replace(/```\s*$/g, '')
-
-  const blocks: SearchReplaceBlock[] = []
-  const lines = s.split('\n')
-  let i = 0
-  const isSearchMark = (l: string) => /^<{5,}\s*SEARCH\s*$/.test(l.trim())
-  const isSplitMark = (l: string) => /^={5,}\s*$/.test(l.trim())
-  const isEndMark = (l: string) => /^>{5,}\s*REPLACE\s*$/.test(l.trim())
-
-  while (i < lines.length) {
-    if (!isSearchMark(lines[i])) {
-      i++
-      continue
-    }
-    i++
-    const search: string[] = []
-    while (i < lines.length && !isSplitMark(lines[i])) search.push(lines[i++])
-    i++ // 跳过 =======
-    const replace: string[] = []
-    while (i < lines.length && !isEndMark(lines[i])) replace.push(lines[i++])
-    if (i >= lines.length) break
-    i++ // 跳过 >>>>>>> REPLACE
-    if (search.length || replace.length) {
-      blocks.push({ search: search.join('\n'), replace: replace.join('\n') })
-    }
-  }
-  return blocks
-}
-
-/** 应用修改块：先精确匹配，失败后按「行 trim」宽松匹配。任一块失败即抛错。 */
-export function applySearchReplace(html: string, blocks: SearchReplaceBlock[]): string {
-  let out = html
-  for (let bi = 0; bi < blocks.length; bi++) {
-    const { search, replace } = blocks[bi]
-    if (!search) continue
-    const idx = out.indexOf(search)
-    if (idx >= 0) {
-      out = out.slice(0, idx) + replace + out.slice(idx + search.length)
-      continue
-    }
-    // 宽松匹配：按行 trim 对齐（模型常在行尾空格/缩进上有细微出入）
-    const applied = applyLenientByLines(out, search, replace)
-    if (!applied) {
-      throw new Error(`第 ${bi + 1} 个修改块的 SEARCH 内容在当前设计稿中找不到`)
-    }
-    out = applied
-  }
-  return out
-}
-
-function applyLenientByLines(html: string, search: string, replace: string): string | null {
-  const doc = html.split('\n')
-  const pat = search.split('\n').map((l) => l.trim())
-  const rep = replace.split('\n')
-  if (pat.some((l) => l === '')) return null
-  for (let start = 0; start <= doc.length - pat.length; start++) {
-    let ok = true
-    for (let j = 0; j < pat.length; j++) {
-      if (doc[start + j].trim() !== pat[j]) {
-        ok = false
-        break
-      }
-    }
-    if (ok) {
-      return [...doc.slice(0, start), ...rep, ...doc.slice(start + pat.length)].join('\n')
-    }
-  }
-  return null
-}
+// （SEARCH/REPLACE 协议的解析与应用实现已抽到 src/utils/searchReplace.ts，见上方 re-export）
 
 /**
  * 消费一个流并累计全文。streamHtml 为 true 时按全量 HTML 模式
@@ -441,4 +372,84 @@ export async function generatePrototype(opts: GenerateOptions): Promise<Generate
     console.warn('[generator] HTML 似乎不完整（缺少 </html>）')
   }
   return { html: finalHtml, mode: opts.isNew ? 'full' : 'fallback' }
+}
+
+// ============ 生成后自评（critique gate）============
+
+const CRITIQUE_SYSTEM = `你是一位以挑剔著称的设计总监，对自己的团队刚交付的网页设计稿做交付前自查。只报告可核查的硬性问题，不客套，也不展开优点。严格输出 JSON：
+{"pass": true, "issues": []}
+{"pass": false, "issues": ["主按钮底色改用契约色 var(--brand-primary)", "…"]}
+要求：每条 issue 一句话、直接可执行（指到具体元素/属性与改法）；最多 4 条，按严重程度排序；只输出 JSON，不要代码围栏与解释。`
+
+function critiqueChecklist(opts: { artifactMode?: ArtifactMode; brandContract?: string }): string {
+  const lines = [
+    '- 完整性与自包含：完整 HTML 文档；除 Google Fonts 外无外部 JS/CSS/图片引用。',
+    '- 内容真实感：示例内容为具体可信的中文（人名/产品/数据），没有 Lorem ipsum 或「点击了解更多」式空洞填充。',
+    '- 无 AI 模板腔：没有蓝紫渐变 / #6366f1 紫主色、居中对称英雄区下接三张均分卡片、emoji 当图标。',
+    '- 层级与呼吸：有明确视觉锚点；区块间距明显大于元素间距；正文对底色对比度可读。',
+  ]
+  const isComponent = opts.artifactMode === 'component'
+  if (isComponent) lines[0] = '- 完整性与边界：完整 HTML 文档；body 是组件展示台而非页面，未出现导航/页脚/hero。'
+  if (opts.brandContract) {
+    lines.push('- 品牌契约：:root 声明了契约 CSS 变量并全页引用；未引入与契约色板明显冲突的颜色。')
+  }
+  return lines.join('\n')
+}
+
+export interface CritiqueResult {
+  /** issues 为空即视为通过 */
+  pass: boolean
+  issues: string[]
+}
+
+/**
+ * 生成一次后让模型自查交付质量（硬事实，不展开优点）。
+ * 解析失败按「通过」处理并 console 警告——自评是附加质量层，不能挡住已生成的结果。
+ */
+export async function critiquePrototype(opts: {
+  provider: ProviderConfig
+  html: string
+  /** 用户原始需求，用于核查「与需求一致」 */
+  brief?: string
+  artifactMode?: ArtifactMode
+  /** 品牌契约提示词段（与生成时同一份） */
+  brandContract?: string
+  signal: AbortSignal
+}): Promise<CritiqueResult> {
+  const checklist = critiqueChecklist(opts)
+  const html =
+    opts.html.length > 20000 ? `${opts.html.slice(0, 20000)}\n<!-- 已截断 -->` : opts.html
+  let acc = ''
+  for await (const delta of streamCompletion(opts.provider, {
+    messages: [
+      { role: 'system', content: CRITIQUE_SYSTEM },
+      {
+        role: 'user',
+        content: [
+          `【交付自查要求】\n${checklist}${opts.brief ? `\n- 与用户需求一致：「${opts.brief.slice(0, 300)}」` : ''}`,
+          '【设计稿 HTML】',
+          html,
+        ].join('\n\n'),
+      },
+    ],
+    signal: opts.signal,
+    temperature: 0.2,
+  })) {
+    acc += delta
+  }
+  const m = stripFences(acc).match(/\{[\s\S]*\}/)
+  if (!m) {
+    console.warn('[critique] 模型输出不是 JSON，跳过本轮自评：', acc.slice(0, 200))
+    return { pass: true, issues: [] }
+  }
+  try {
+    const data = JSON.parse(m[0]) as { issues?: unknown }
+    const issues = Array.isArray(data.issues)
+      ? data.issues.map(String).map((s) => s.trim()).filter(Boolean)
+      : []
+    return { pass: issues.length === 0, issues }
+  } catch {
+    console.warn('[critique] JSON 解析失败，跳过本轮自评')
+    return { pass: true, issues: [] }
+  }
 }

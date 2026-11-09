@@ -1,4 +1,5 @@
 import type { Artboard } from '@/types'
+import { withBoardCSP } from './htmlExtract'
 
 export interface ViewerBoard {
   title: string
@@ -14,7 +15,8 @@ export function buildProjectViewerHtml(projectTitle: string, boards: Artboard[])
   const items: ViewerBoard[] = boards
     .map((b) => {
       const cur = b.versions.find((v) => v.id === b.currentVersionId) ?? b.versions[b.versions.length - 1]
-      return { title: b.title, html: cur?.html ?? '' }
+      // 每块画板注入 CSP meta + 仅 allow-scripts 的沙箱：导出文件里的代码一样不可信
+      return { title: b.title, html: cur?.html ? withBoardCSP(cur.html) : '' }
     })
     .filter((b) => b.html.length > 100)
   const payload = JSON.stringify(items).replace(/</g, '\\u003c')
@@ -94,7 +96,7 @@ export function buildProjectViewerHtml(projectTitle: string, boards: Artboard[])
 </header>
 <main>
   <nav id="nav"></nav>
-  <div class="stage"><iframe id="frame" sandbox="allow-same-origin allow-scripts" title="画板预览"></iframe><div class="empty" id="empty" hidden>该项目暂无可预览的画板</div></div>
+  <div class="stage"><iframe id="frame" sandbox="allow-scripts" title="画板预览"></iframe><div class="empty" id="empty" hidden>该项目暂无可预览的画板</div></div>
 </main>
 <footer>← <kbd>→</kbd> 切换画板 · 由 AI 原型画布导出，画板源码可直接交给正式开发</footer>
 <script id="dc-data" type="application/json">${payload}</script>
@@ -137,6 +139,17 @@ export function buildProjectViewerHtml(projectTitle: string, boards: Artboard[])
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] ?? c)
+}
+
+/** 触发浏览器下载（任意纯文本文件） */
+export function downloadText(filename: string, text: string) {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 4000)
 }
 
 /** 触发浏览器下载 */

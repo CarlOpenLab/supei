@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { Artboard, ArtifactMode, CaptureSource, ChatAttachment, ChatMessage, ChatRole, ElementContext, LiveSource, PlanPayload, Project, Version } from '@/types'
+import type { Artboard, ArtifactMode, BrandContract, CaptureSource, ChatAttachment, ChatMessage, ChatRole, ElementContext, LiveSource, PlanPayload, Project, Version } from '@/types'
 import * as db from '@/services/db'
 import { uid } from '@/utils/id'
 
@@ -15,6 +15,9 @@ export interface NewArtboardInput {
   live?: LiveSource
   capture?: CaptureSource
 }
+
+/** 版本上限：第 1 版（基线）+ 最近 49 版；旧版本随修剪从 IndexedDB 消失 */
+const MAX_VERSIONS = 50
 
 /** 深拷贝画板快照为新画板：新 id、级联偏移（+48）、刷新时间戳；title/parent 等由调用方覆盖。 */
 function cloneArtboard(snap: Artboard, projectId: string, overrides: Partial<Artboard>): Artboard {
@@ -80,6 +83,15 @@ export const useWorkspaceStore = defineStore('workspace', {
       const p = this.projects.find((x) => x.id === id)
       if (!p) return
       p.name = name.trim() || p.name
+      p.updatedAt = Date.now()
+      await db.putProject(p)
+    },
+
+    /** 更新（或传 null 清除）当前项目的品牌契约，随项目落盘 */
+    async setBrandContract(contract: BrandContract | null) {
+      const p = this.currentProject
+      if (!p) return
+      p.brandContract = contract ?? undefined
       p.updatedAt = Date.now()
       await db.putProject(p)
     },
@@ -179,6 +191,11 @@ export const useWorkspaceStore = defineStore('workspace', {
         sourceMessageId: extra.sourceMessageId,
       }
       b.versions.push(version)
+      // 版本上限：每版整份 HTML，不做修剪会让项目体积随迭代无界增长。
+      // 从第 2 版起裁剪：versions[0] 永远保留（捕获画板以它作为设计稿基线）。
+      if (b.versions.length > MAX_VERSIONS) {
+        b.versions.splice(1, b.versions.length - MAX_VERSIONS)
+      }
       b.currentVersionId = version.id
       b.updatedAt = Date.now()
       await db.putArtboard(b)

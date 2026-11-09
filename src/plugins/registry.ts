@@ -12,7 +12,6 @@ import type {
   StylePluginData,
   TemplatePluginData,
 } from './types'
-import { isPluginKind } from './types'
 
 // —— 内置插件数据（从旧散落常量收编）——
 
@@ -359,66 +358,7 @@ export const pluginRegistry = {
 
 // —— 兼容旧风格包（{name, prompt}）与新 manifest 的导入 ——
 
-export interface ImportedPluginEntry {
-  kind: PluginKind
-  name: string
-  description?: string
-  data: unknown
-}
-
-export function parsePluginFile(text: string, filename: string): ImportedPluginEntry[] {
-  const isJson =
-    filename.endsWith('.json') || text.trim().startsWith('[') || text.trim().startsWith('{')
-  if (isJson) {
-    const data = JSON.parse(text)
-    const arr = Array.isArray(data) ? data : [data]
-    return arr.flatMap((item: Record<string, unknown>) => {
-      // v2 manifest
-      if (Array.isArray(item.plugins)) {
-        const kindDefault = isPluginKind(item.kind) ? item.kind : undefined
-        return (item.plugins as Record<string, unknown>[]).map((p) =>
-          normalizeEntry(kindDefault ?? p.kind, p),
-        )
-      }
-      // 旧风格包：{name, prompt}
-      return [normalizeEntry('style', item)]
-    })
-  }
-  // markdown 风格包（frontmatter + 正文 → style 插件）
-  const fm = text.trim().match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/)
-  let label = ''
-  let body = text.trim()
-  if (fm) {
-    for (const line of fm[1].split(/\r?\n/)) {
-      const m = line.match(/^name\s*:\s*(.+)$/)
-      if (m) label = m[1].trim().replace(/^["']|["']$/g, '')
-    }
-    body = fm[2]
-  }
-  if (!label) {
-    const h1 = body.match(/^#\s+(.+)$/m)
-    label = h1 ? h1[1].trim() : filename.replace(/\.[^.]+$/, '')
-  }
-  return [{ kind: 'style', name: label, data: { prompt: body.trim() } }]
-}
-
-function normalizeEntry(kind: unknown, p: Record<string, unknown>): ImportedPluginEntry {
-  const k = isPluginKind(kind) ? kind : 'style'
-  const name = String(p.name ?? p.label ?? '').trim()
-  if (k === 'style') return { kind: k, name, data: { prompt: String(p.prompt ?? p.directive ?? '').trim() } }
-  if (k === 'preset') return { kind: k, name, data: { icon: String(p.icon ?? 'sparkle'), prompt: String(p.prompt ?? '').trim() } }
-  if (k === 'template')
-    return {
-      kind: k,
-      name,
-      data: { width: Number(p.width ?? 1280), height: Number(p.height ?? 800) },
-    }
-  if (k === 'icon') {
-    const data = (p.data ?? p.icons ?? {}) as IconPluginData
-    return { kind: k, name, data }
-  }
-  return { kind: 'style', name, data: { prompt: '' } }
-}
+export { parsePluginFile, type ImportedPluginEntry } from './parse'
 
 // 启动加载用户插件
 load()

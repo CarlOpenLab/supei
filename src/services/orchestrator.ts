@@ -6,7 +6,8 @@ import { ARTIFACT_MODE_QUESTION_ID, artifactModePromptLabel, inferArtifactMode, 
 import { applyEdits } from '@/utils/editable'
 import { branchPosition, branchTitle, captureRootOf, findFreeSpot, manualBranchTitle } from '@/utils/boardBranch'
 import { describeChanges } from '@/utils/diff'
-import { describeElement, generatePrototype } from './generator'
+import { contractPrompt } from '@/utils/brandContract'
+import { critiquePrototype, describeElement, generatePrototype } from './generator'
 import { isAgentProvider, streamAgent } from './llm'
 import { planIteration, planPrototype } from './planner'
 import { pluginRegistry } from '@/plugins/registry'
@@ -16,6 +17,13 @@ const activeControllers = new Set<AbortController>()
 
 /** 最近一次失败的请求（生成原型或 Agent 改代码），供错误卡上的「重试」使用 */
 let retryAction: (() => Promise<void>) | null = null
+/** retryAction 所属项目：用户已切换项目时重试无效（画板在另一个项目里），提前拦截 */
+let retryProjectId: string | null = null
+
+function setRetry(projectId: string | null, action: () => Promise<void>): void {
+  retryAction = action
+  retryProjectId = projectId
+}
 
 function defaultTemplate(): TemplatePluginData {
   const t = pluginRegistry.listByKind('template')[0]
@@ -40,6 +48,13 @@ export function stopGeneration() {
 export async function retryLast() {
   const action = retryAction
   if (!action || useCanvasStore().busy) return
+  const ws = useWorkspaceStore()
+  if (ws.currentProjectId !== retryProjectId) {
+    // 切换过项目：旧画板不在当前 store 里，重试只会静默失效，直接作废
+    retryAction = null
+    console.warn('[retry] 已切换项目，重试已作废')
+    return
+  }
   retryAction = null
   await action()
 }
@@ -206,6 +221,7 @@ async function runGeneration(params: {
       styleId: params.styleOverride ? undefined : cv.designStyleId,
       styleOverride: params.styleOverride,
       reasoningEffort: cv.deepThink ? 'high' : undefined,
+      brandContract: contractPrompt(ws.currentProject?.brandContract) || undefined,
       prompt,
       currentHtml,
       elementContext,
@@ -229,11 +245,36 @@ async function runGeneration(params: {
         : `已根据反馈生成新画板「${target.title}」${tail}`,
       versionId: version.id,
     })
+
+    // —— 生成后自评（critique gate，设置里可关）：不回滚产物，硬问题以诊断卡留在对话流 ——
+    if (st.critique && st.active && result.html.length > 4000) {
+      try {
+        const audit = await critiquePrototype({
+          provider: st.active,
+          html: result.html,
+          brief: prompt.trim(),
+          artifactMode,
+          brandContract: contractPrompt(ws.currentProject?.brandContract) || undefined,
+          signal: ac.signal,
+        })
+        if (audit.issues.length) {
+          await ws.addMessage({
+            artboardId: target.id,
+            role: 'assistant',
+            content: `交付自查（critique）发现 ${audit.issues.length} 处硬问题：\n- ${audit.issues.join('\n- ')}\n\n直接在输入框回复修复要求即可让 AI 继续迭代。`,
+          })
+        }
+      } catch (auditErr) {
+        // 停止 / 网络抖动：生成已成功，自评失败不影响结果
+        if ((auditErr as Error).name === 'AbortError') return
+        console.warn('[critique] 自评失败（不影响结果）：', (auditErr as Error).message)
+      }
+    }
   } catch (err) {
     const e = err as Error
     const aborted = e.name === 'AbortError'
     if (!aborted) {
-      retryAction = async () => {
+      setRetry(source.projectId, async () => {
         const b = ws.findArtboard(source.id)
         if (b) {
           await runGeneration({
@@ -243,7 +284,7 @@ async function runGeneration(params: {
             withUserMessage: false,
           })
         }
-      }
+      })
     }
     await ws.addMessage({
       artboardId: isNew ? target.id : source.id,
@@ -670,7 +711,7 @@ export async function runCodeAgent(params: {
     promptText: params.prompt,
   })
   if (!provider || !isAgentProvider(provider)) {
-    retryAction = () => runCodeAgent(params)
+    setRetry(ws.findArtboard(boardId)?.projectId ?? null, () => runCodeAgent(params))
     await ws.addMessage({
       artboardId: boardId,
       role: 'assistant',
@@ -705,13 +746,16 @@ export async function runCodeAgent(params: {
   }
 
   try {
+    // 品牌契约（启用时）随指令下发：真实仓库的新增 CSS 也朝项目 token 靠拢
+    const directive = contractPrompt(ws.currentProject?.brandContract)
+    const agentPrompt = directive ? `${directive}\n\n【本次任务】\n${params.prompt}` : params.prompt
     for await (const delta of streamAgent({
       kind: provider.kind,
       model: provider.model,
       mode: 'code',
       cwd: params.repoDir,
       systemPrompt: CODE_AGENT_PROMPT,
-      prompt: params.prompt,
+      prompt: agentPrompt,
       signal: ac.signal,
       onEvent: (e) => {
         if (e.type === 'tool') {
@@ -731,7 +775,7 @@ export async function runCodeAgent(params: {
     if (e.name === 'AbortError') {
       await ws.updateMessage(msg.id, { content: `已停止。\n\n${render()}`, status: 'aborted' })
     } else {
-      retryAction = () => runCodeAgent(params)
+      setRetry(ws.findArtboard(boardId)?.projectId ?? null, () => runCodeAgent(params))
       await ws.updateMessage(msg.id, { content: `改代码失败：${e.message}`, status: 'error' })
       console.error('[code-agent]', err)
     }

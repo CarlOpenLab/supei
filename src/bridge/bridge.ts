@@ -624,6 +624,7 @@ export const BRIDGE_SCRIPT = String.raw`
   });
 
   window.addEventListener('message', function (e) {
+    if (e.source !== parent) return; // 指令只能来自直接宿主窗口（channel 名是公开的，来源是唯一可信判定）
     var d = e.data || {};
     if (d.channel !== CHANNEL) return;
     if (d.type === 'dc:set-enabled') {

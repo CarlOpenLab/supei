@@ -23,6 +23,8 @@ Supei 是一块与 AI 协作的无限画布：聊天生成、流式预览、点�
 **AI 协作**
 
 - v0 式对话流：AI 规划卡（澄清问题 + 风格方案 + 多方向并排生成）、迭代意图确认；每个问题都可自由输入自定义答案
+- **项目级品牌契约**：调色板 → `--brand-*` 变量、标题/正文字体、圆角与间距基准、自定义硬规则；启用后本项目所有生成（新建 / 增量迭代 / Agent 改代码）都被强制遵守，多块画板之间风格天然一致，可一键导出与生成约束逐字一致的 `tokens.css`
+- **生成后自评（critique）**：交付前模型自查一轮硬性问题（真实感、模板腔、层级与契约遵守），诊断卡直接出现在对话流；设置里可关
 - **参考图 / 资料附件**：输入卡支持选取、拖入、粘贴图片与文本资料（md / txt / csv / 代码等），图片以缩略图随消息展示，文本正文自动拼入提示词作为生成上下文
 - **页面 / 组件双模式**：按需求自动判断产出整页原型还是单个 UI 组件，规划卡可改选类型；组件以状态 / 变体规格展示稿输出，不生成页面框架
 - Aider 风格 **SEARCH/REPLACE 增量协议**：只改你指的地方，未提及部分逐字保留，失败自动回退全量
@@ -119,7 +121,7 @@ API Key 仅保存在本机 localStorage。桌面端请求经 Go 代理发出（�
 
 Vue 3 + TypeScript + Vite + Pinia + vue-router；UI 基座 antdv-next，AI 聊天组件 @antdv-next/x（Bubble）；持久化 IndexedDB（画板数据 + 缩略图缓存双库）；LLM 双路径——桌面 Go 代理 / 浏览器 fetch 直连的 OpenAI 兼容 SSE，运行时自动探测降级。
 
-原型画板为沙箱 iframe 渲染的自包含 HTML；点选功能通过注入 iframe 的 bridge 脚本实现（hover 高亮、点击拦截、Ctrl+滚轮缩放与键盘事件转发）。迭代采用 Aider 风格增量协议：模型只输出 `<<<<<<< SEARCH / ======= / >>>>>>> REPLACE` 修改块，应用时先精确匹配再按行 trim 宽松匹配，任一块失败自动回退全量重生成。
+原型画板为沙箱 iframe 渲染的自包含 HTML（sandbox 仅 allow-scripts、不含 same-origin，注入的 CSP meta 关死 fetch/XHR/WebSocket 等全部外呼通道——允许的只有内联脚本与样式、Google Fonts、http/https 图片）；点选功能通过注入 iframe 的 bridge 脚本实现（hover 高亮、点击拦截、Ctrl+滚轮缩放与键盘事件转发）。导出的单文件 viewer 与局域网分享页沿用同一套 CSP 约束。迭代采用 Aider 风格增量协议：模型只输出 `<<<<<<< SEARCH / ======= / >>>>>>> REPLACE` 修改块，应用时先精确匹配再按行 trim 宽松匹配，任一块失败自动回退全量重生成。
 
 AI 侧设计规范与内置风格位于 `src/plugins/registry.ts`（插件化 registry）与 `src/services/generator.ts` 的 `SYSTEM_PROMPT`；端到端验收脚本见 `scripts/e2e-final.mjs`。
 

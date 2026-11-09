@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,9 +16,23 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 )
+
+// llmClient carries all outbound LLM calls. Dial/TLS/header phases get
+// timeouts so a wrong baseURL fails fast with a clear error instead of
+// hanging forever; the streaming body read is not time-limited.
+var llmClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		ForceAttemptHTTP2:     true,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 45 * time.Second,
+	},
+}
 
 // Greeter is callable from the frontend: `mygo generate` turns its methods
 // into typed TypeScript functions in ../src/services/mygo-client.ts.
@@ -95,7 +110,7 @@ func (LLMService) Stream(ctx context.Context, opts LLMOptions, out *mygo.Channel
 	if opts.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+opts.APIKey)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := llmClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("无法连接到模型服务：%w", err)
 	}
@@ -156,7 +171,7 @@ func (LLMService) ListModels(ctx context.Context, baseURL string, apiKey string)
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := llmClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("无法连接到模型服务：%w", err)
 	}

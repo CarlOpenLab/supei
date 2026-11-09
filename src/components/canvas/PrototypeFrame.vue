@@ -35,6 +35,16 @@ const reloadKey = ref(0)
 let savedScroll = { x: 0, y: 0 }
 let observer: IntersectionObserver | null = null
 
+/** 实时 src 模式下 iframe 的源（用于消息一发一收的 origin 白名单）；srcdoc 模式为 null（沙箱 opaque origin） */
+const srcOrigin = computed(() => {
+  if (props.src === undefined) return null
+  try {
+    return new URL(props.src, location.href).origin
+  } catch {
+    return null
+  }
+})
+
 // 流式中间态不打编号（不完整、也不可编辑）；定稿后打编号供检查器映射回源码
 const fullDoc = computed(() =>
   props.html === undefined ? '' : injectBridge(props.streaming ? props.html : stampIds(props.html)),
@@ -80,7 +90,8 @@ watch(
 function postToFrame(msg: Record<string, unknown>) {
   const win = iframeRef.value?.contentWindow
   if (!win) return
-  win.postMessage({ channel: 'design-canvas', ...msg }, '*')
+  // src 模式收敛到该页面的源；srcdoc 模式（opaque origin）必须用通配
+  win.postMessage({ channel: 'design-canvas', ...msg }, srcOrigin.value ?? '*')
 }
 
 function postEnabledState() {
@@ -159,6 +170,9 @@ async function openExternal(href: string) {
 
 function onMessage(ev: MessageEvent) {
   if (ev.source !== iframeRef.value?.contentWindow) return
+  // 来源校验：src 模式必须来自该页面的源；srcdoc 沙箱（无 allow-same-origin）origin 恒为 'null'
+  const expect = srcOrigin.value ?? 'null'
+  if (ev.origin !== expect) return
   const data = ev.data as
     | {
         channel: string
@@ -273,6 +287,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <!-- 实时页面（dev server / 网页捕获）经本机代理加载，保留 allow-same-origin 是为了登录态、
+       HMR 与 localStorage 等页面自身的运行状态：其源是随机端口的 127.0.0.1，与宿主不同源，
+       无法触达 mygo 桥接；全局 CSP 也注入不到这种页面（会破坏用户仓库自身的网络行为）。 -->
   <iframe
     v-if="src !== undefined"
     ref="iframeRef"
@@ -287,7 +304,7 @@ onBeforeUnmount(() => {
     ref="iframeRef"
     class="prototype-frame"
     :srcdoc="appliedDoc"
-    sandbox="allow-same-origin allow-scripts"
+    sandbox="allow-scripts"
     @load="onFrameLoad"
   ></iframe>
 </template>

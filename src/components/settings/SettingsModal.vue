@@ -557,6 +557,14 @@ const kindOptions = (['style', 'preset', 'template'] as PluginKind[]).map((k) =>
             <Button type="dashed" block @click="addProvider">＋ 添加服务商</Button>
           </div>
 
+          <label class="critique-row">
+            <input v-model="settings.critique" type="checkbox" class="critique-check" @change="settings.save()" />
+            <span>
+              <b>生成后自评（critique）</b>
+              <small>生成完成后再让模型自查一轮交付质量，硬问题以诊断卡出现在对话里（每次多一次轻量模型调用）。</small>
+            </span>
+          </label>
+
           <div class="tips">
             <p>· 兼容所有提供 OpenAI 接口的服务商；本地网关（如 <code>Magpie</code>，默认 <code>http://127.0.0.1:3425/v1</code>）通常无需 Key。</p>
             <p>· 模型名可手填，也可点「从网关获取」拉取真实列表后点选；Key 仅存本机（localStorage）。</p>
@@ -1181,5 +1189,31 @@ label span {
   justify-content: flex-end;
   gap: 8px;
   padding: 0 12px;
+}
+
+.critique-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(127, 127, 127, 0.2);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.critique-check {
+  margin-top: 3px;
+  accent-color: var(--primary, #2f5d50);
+}
+
+.critique-row b {
+  display: block;
+  font-size: 13px;
+}
+
+.critique-row small {
+  color: var(--muted, #888);
+  line-height: 1.5;
 }
 </style>
